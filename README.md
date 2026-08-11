@@ -1,0 +1,204 @@
+# paper-mcp
+
+An MCP server that gives an agent a canvas.
+
+The agent pushes HTML frames onto it. A human opens the canvas in a browser, scrolls
+around, and drops pinned comments on the frames. The agent reads those comments back
+through MCP and replies inside the thread. That round trip — **draw → comment → read
+feedback** — is the whole product.
+
+One process serves both halves: an MCP server on stdio and the canvas web app over
+HTTP, sharing one SQLite database and one event bus, so an agent's `push_html` shows up
+in the human's open browser instantly and a human's comment is readable by the agent on
+the next poll.
+
+## Install
+
+Requires [Bun](https://bun.sh) 1.3+.
+
+```sh
+git clone https://github.com/caffeinum/paper-mcp
+cd paper-mcp
+bun install
+bun run build:web     # builds web/dist/canvas.js — the server refuses to boot without it
+```
+
+## Run
+
+```sh
+bun run src/index.ts          # HTTP + MCP over stdio (what an MCP client launches)
+bun run src/index.ts serve    # HTTP only — the canvas without an agent attached
+```
+
+The canvas is at <http://127.0.0.1:4321>. The resolved base URL is also written to
+`~/.paper-mcp/server.json`.
+
+| env | default | meaning |
+| --- | --- | --- |
+| `PAPER_MCP_PORT` | `4321` | HTTP port. If busy, the next free port is used and reported. |
+| `PAPER_MCP_HOST` | `127.0.0.1` | bind address |
+| `PAPER_MCP_DB` | `~/.paper-mcp/paper.db` | SQLite file. `:memory:` for throwaway runs. |
+
+stdout belongs to the MCP stdio transport; every log line goes to stderr.
+
+## MCP client config
+
+Claude Code:
+
+```sh
+claude mcp add paper -- bun run /absolute/path/to/paper-mcp/src/index.ts
+```
+
+Raw JSON (`.mcp.json`, `claude_desktop_config.json`, or any MCP client):
+
+```json
+{
+  "mcpServers": {
+    "paper": {
+      "command": "bun",
+      "args": ["run", "/absolute/path/to/paper-mcp/src/index.ts"],
+      "env": {
+        "PAPER_MCP_PORT": "4321"
+      }
+    }
+  }
+}
+```
+
+## Tools
+
+| tool | what it does |
+| --- | --- |
+| `push_html` | `{html, name?, frameId?, width?, height?}` — draws a frame. No `frameId` creates one to the right of the last; with `frameId` it replaces that frame's HTML in place and bumps `version`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
+| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first (newest last), resolved excluded by default. Returns `{comments, cursor}`; pass `cursor` back as `since` to poll for only what is new. `since` also accepts an ISO timestamp. |
+| `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
+| `reply_to_comment` | `{commentId, text}` — posts a threaded reply as `"agent"`; it appears live in the human's open thread. |
+| `resolve_comment` | `{commentId, note?}` — marks the comment resolved so it drops out of `get_comments`; `note` is also posted as an agent reply. |
+| `delete_frame` | `{frameId}` — removes a frame and its comments. |
+
+## The loop
+
+```
+agent                                     human
+-----                                     -----
+push_html { html: "<h1>Pricing</h1>…" }
+  → { frameId: "frm_a1b2c3d4e5f6",
+      canvasUrl: "http://127.0.0.1:4321/" }
+"open the canvas and tell me what's off"
+                                          opens canvasUrl, presses `c`,
+                                          clicks the frame, types
+                                          "the CTA is buried"
+
+get_comments { frameId: "frm_a1b2c3d4e5f6" }
+  → { comments: [{ id: "cmt_9f8e…",
+                   x: 612, y: 340,
+                   text: "the CTA is buried",
+                   author: "human" }],
+      cursor: "cmt_9f8e…" }
+
+reply_to_comment { commentId: "cmt_9f8e…",
+                   text: "moving it above the fold" }
+                                          sees the reply in the thread
+
+push_html { frameId: "frm_a1b2c3d4e5f6",
+            html: "<h1>Pricing</h1>…" }   the iframe reloads in place,
+  → { version: 2 }                        pan/zoom and pins survive
+
+resolve_comment { commentId: "cmt_9f8e…",
+                  note: "CTA is now first" }
+                                          the pin greys out
+
+get_comments { since: "cmt_9f8e…" }       ← poll with the cursor for what's new
+```
+
+Comments are anchored to the frame, not to the DOM, so they survive every `push_html`
+update. Each comment records the `frameVersion` it was left on.
+
+## Canvas
+
+- Two-finger scroll pans, `⌘`/`ctrl` + scroll zooms around the cursor, space-drag or
+  middle-drag pans, `⌘0` resets, `⌘1` zooms to fit.
+- `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
+  at that frame-local coordinate and opens a composer. `esc` cancels.
+- Click a pin to open its thread — reply, resolve, or delete there.
+- Double-click a frame to interact with the page inside it; `esc` leaves.
+- The sidebar lists every comment grouped by frame, unresolved first; clicking one pans
+  to its pin.
+- Frames render in `<iframe sandbox="allow-scripts allow-forms allow-popups">` with no
+  `allow-same-origin`, so pushed HTML cannot reach the canvas app or its storage.
+- SSE keeps it live: pushes, comments, replies, and resolutions all arrive without a
+  reload.
+
+## HTTP API
+
+| method | path | purpose |
+| --- | --- | --- |
+| GET | `/` | canvas app |
+| GET | `/api/frames` | `{frames}` — frame list, no HTML |
+| GET | `/api/frames/:id` | frame incl. HTML |
+| POST | `/api/frames` | create (201) / update in place (200) — same body as `push_html` |
+| DELETE | `/api/frames/:id` | `{ok, id}` |
+| GET | `/f/:id` | raw frame HTML for the iframe `src` |
+| GET | `/api/comments?frameId=&since=&includeResolved=&author=` | `{comments, cursor}` |
+| POST | `/api/comments` | `{frameId, x, y, text, parentId?, author?}` → 201 |
+| PATCH | `/api/comments/:id` | `{resolved?, text?}` |
+| DELETE | `/api/comments/:id` | `{ok, id}` |
+| GET | `/api/events` | SSE: `frame.created` `frame.updated` `frame.deleted` `comment.created` `comment.updated` `comment.deleted` |
+| GET | `/api/health` | `{ok: true, frames, comments}` |
+
+Errors are `{error: string}` with a real status code. Bad input fails with the zod
+message — never a coerced default.
+
+## Make sure it works
+
+Two commands. The first is the whole suite; the second proves the same loop against a
+client that is not our code at all.
+
+```sh
+bun run typecheck      # tsc --noEmit, strict
+bun run build:web      # web/dist/canvas.js — the server refuses to boot without it
+bun test               # store units + HTTP/SSE integration + MCP e2e over a real client
+bash test/mcpt-loop.sh # the same loop driven by the external `mcpt` CLI
+```
+
+Expect `bun test` to report **72 pass / 0 fail across 3 files** in ~15s, and the script to
+end with `OK — the loop works through mcpt`. Both exit non-zero on any failure, and both
+are safe to run repeatedly: every test gets its own temp database, its own `HOME` (so your
+real `~/.paper-mcp/server.json` is never touched), and an ephemeral port. Nothing needs
+cleaning up between runs.
+
+### `bun test`
+
+| file | what it covers |
+| --- | --- |
+| `test/store.test.ts` | ids, cascades, `since` cursor semantics, version bumps |
+| `test/http.test.ts` | every route on an ephemeral port, plus SSE (one test idles 12s on purpose, to prove a stream outlives Bun's 10s default `idleTimeout`) |
+| `test/mcp-e2e.test.ts` | the MCP surface, from outside |
+
+`test/mcp-e2e.test.ts` never calls a handler directly. Each test spawns
+`bun src/index.ts` as a child process against a fresh temp-file database, connects the
+SDK's `Client` over `StdioClientTransport`, and drives the real loop: all six tools are
+advertised → `push_html` creates a frame whose `canvasUrl` and `/f/:id` are both live →
+pushing the same `frameId` bumps the version without adding a frame → a bogus `frameId`
+is a tool error that creates nothing → a comment POSTed over HTTP the way the browser
+does comes back through `get_comments` → the returned cursor yields only what is new →
+`reply_to_comment` lands in the thread → `resolve_comment` resolves the root *and* posts
+its note as an agent reply → `delete_frame` cascades. It also asserts the process
+contract: the child exits on stdin EOF alone with no signal, and two server processes
+can share one database file without losing writes.
+
+### `test/mcpt-loop.sh`
+
+Needs the [`mcpt` CLI](https://github.com/f/mcp-tools) on `PATH`, and exits 127 with an
+install hint if it is missing (`brew install f/mcptools/mcp`). It is not part of
+`bun test` for that reason — run it before you ship.
+
+```sh
+bash test/mcpt-loop.sh
+```
+
+It stands up one long-lived `serve` process on a pinned port as the human's browser side,
+then has `mcpt` spawn a fresh stdio server per call against the **same** temp database
+file — so the handoff it proves is a real cross-process one. Note that `mcpt` exits 0 even
+when a tool returns `isError`, so the script checks `isError` itself on every call rather
+than trusting the exit code.

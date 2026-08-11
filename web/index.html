@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="color-scheme" content="light dark" />
+    <title>paper-mcp canvas</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e2543a'/%3E%3Cpath d='M9 22V10h8a5 5 0 010 10h-4' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar" class="sidebar">
+        <header class="sidebar-head">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-name">paper<span class="brand-dim">-mcp</span></span>
+          </div>
+          <div id="conn" class="conn" data-state="connecting" title="event stream">
+            <span class="conn-dot" aria-hidden="true"></span>
+            <span class="conn-label">connecting</span>
+          </div>
+        </header>
+
+        <div class="sidebar-stats">
+          <span id="stat-frames">0 frames</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="stat-open">0 open</span>
+        </div>
+
+        <div id="comment-list" class="comment-list" role="list"></div>
+
+        <footer class="sidebar-foot">
+          <kbd>c</kbd> comment <span class="sep">·</span> <kbd>⌘0</kbd> reset <span class="sep">·</span>
+          <kbd>⌘1</kbd> fit <span class="sep">·</span> <kbd>space</kbd> pan
+        </footer>
+      </aside>
+
+      <main id="stage" class="stage">
+        <div id="viewport" class="viewport">
+          <div id="world" class="world"></div>
+        </div>
+
+        <div id="empty" class="empty" hidden>
+          <div class="empty-card">
+            <span class="empty-pulse" aria-hidden="true"></span>
+            <h1>The canvas is live.</h1>
+            <p>
+              The server is up and listening. Nothing has been drawn yet — point an agent at
+              <code>paper-mcp</code> and ask it to <code>push_html</code>. Frames land here the
+              instant they arrive.
+            </p>
+            <div class="snippet">
+              <div class="snippet-head">
+                <span>MCP config</span>
+                <button id="copy-config" class="ghost-btn" type="button">Copy</button>
+              </div>
+              <pre id="config-snippet"></pre>
+            </div>
+            <p class="empty-alt">or, in a terminal: <code id="cli-snippet"></code></p>
+          </div>
+        </div>
+
+        <div id="toolbar" class="toolbar">
+          <button id="tool-comment" class="tool" type="button" title="Comment mode (c)" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v9H9l-4 3v-3H4z" /></svg>
+            <span>Comment</span>
+          </button>
+          <span class="tool-sep" aria-hidden="true"></span>
+          <button id="tool-zoom-out" class="tool icon" type="button" title="Zoom out">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="9" width="12" height="2" rx="1" /></svg>
+          </button>
+          <button id="tool-zoom-level" class="tool zoom" type="button" title="Reset zoom (⌘0)">100%</button>
+          <button id="tool-zoom-in" class="tool icon" type="button" title="Zoom in">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M9 4h2v5h5v2h-5v5H9v-5H4V9h5z" /></svg>
+          </button>
+          <span class="tool-sep" aria-hidden="true"></span>
+          <button id="tool-fit" class="tool" type="button" title="Zoom to fit (⌘1)">Fit</button>
+        </div>
+
+        <div id="layer" class="layer"></div>
+        <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+      </main>
+    </div>
+
+    <script type="module" src="/dist/canvas.js"></script>
+  </body>
+</html>

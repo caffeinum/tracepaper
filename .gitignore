@@ -5,3 +5,6 @@ web/dist/
 *.db-*
 .DS_Store
 .paper-mcp/
+.tmp-*
+*.tsbuildinfo
+*.log
