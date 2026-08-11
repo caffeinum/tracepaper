@@ -1,0 +1,61 @@
+src/store.ts
+  s_7adfa64874e58c::t_72d32c576322c9 65-69
+  s_7adfa64874e58c::t_45a4058ef7b187 94-95,106,109-111
+  s_7adfa64874e58c::t_5c6e08ce7e86ff 45-46,56-62,70-72
+  s_7adfa64874e58c::t_d00091a9e7c681 132,134-174
+  s_7adfa64874e58c::t_f558cd1b8464c5 266-272
+  s_7adfa64874e58c::t_2a672664689e5a 133
+  s_7adfa64874e58c::t_6889964076e330 361-368
+  s_7adfa64874e58c::t_8aefc7734ac9ba 221,226-228,235-236,242-243
+  s_7adfa64874e58c::t_fd0aff3b945d70 19-25
+  s_7adfa64874e58c::t_e02028a9ec6ed3 370,373,392-405,410-414,416-422,427-429
+  s_7adfa64874e58c::t_33daafd1fa72ad 297-299,307,313,316-317,320,337-339
+  s_7adfa64874e58c::t_5c9145b195ac87 439,446,453-458
+  s_7adfa64874e58c::t_30136578972acd 441-443
+  s_7adfa64874e58c::t_40ca6de6773c45 112
+test/mcp-e2e.test.ts
+  s_7adfa64874e58c::t_8f0257e475fde5 380-381,384
+src/index.ts
+  s_7adfa64874e58c::t_1943eb81ca7e91 34-58,65-76
+  s_7adfa64874e58c::t_59d009447fc98f 1
+  s_7adfa64874e58c::t_a6a48cfe7bfc6c 83,95
+  s_7adfa64874e58c::t_00cefce613eec5 96
+  s_7adfa64874e58c::t_7e654c47c412c0 3
+web/canvas.ts
+  s_7adfa64874e58c::t_727dc1c826ca2a 1090-1103
+  s_7adfa64874e58c::t_43a5d57317c357 1182
+src/types.ts
+  s_7adfa64874e58c::t_380ea40ba40150 87-88
+src/compat.ts
+  s_7adfa64874e58c::t_c568e2ee27a987 1-42
+test/mcpt-loop.sh
+  s_7adfa64874e58c::t_6d9a73666845c2 101-104,106
+  s_7adfa64874e58c::t_32e8477259831d 105
+  s_7adfa64874e58c::t_e0f1f44eb27da3 161,164-166,169
+test/store.test.ts
+  s_7adfa64874e58c::t_117aa8aded4764 73
+  s_7adfa64874e58c::t_e3e9aa1f88f5a0 351-467,469-472,475,485-502
+  s_7adfa64874e58c::t_6b6e8d58e537a4 482
+  s_7adfa64874e58c::t_9fd9684759f081 468
+  s_7adfa64874e58c::t_ac531ca1633d40 473-474,476-481,483-484
+src/mcp.ts
+  s_7adfa64874e58c::t_739fdd630fa0d3 124
+src/http.ts
+  s_7adfa64874e58c::t_8f037ccda9f31e 210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6d2834a52ac7e246e5fe5f11270068bdaae98600",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
