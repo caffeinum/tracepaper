@@ -16,6 +16,13 @@ import {
   type UpdateCommentPatch,
 } from "./types.ts";
 
+/** Fields `push_html` may change on an existing frame. Anything omitted is left alone. */
+export type UpdateFramePatch = {
+  name?: string;
+  width?: number;
+  height?: number;
+};
+
 const FRAME_GAP = 120;
 /** How long a write waits for another process's lock before failing loudly. */
 const BUSY_TIMEOUT_MS = 5000;
@@ -35,7 +42,8 @@ CREATE TABLE IF NOT EXISTS frames (
 );
 
 CREATE TABLE IF NOT EXISTS comments (
-  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  seq          INTEGER PRIMARY KEY,
+  updatedSeq   INTEGER NOT NULL,
   id           TEXT    NOT NULL UNIQUE,
   frameId      TEXT    NOT NULL REFERENCES frames(id) ON DELETE CASCADE,
   x            REAL    NOT NULL,
@@ -45,11 +53,23 @@ CREATE TABLE IF NOT EXISTS comments (
   parentId     TEXT             REFERENCES comments(id) ON DELETE CASCADE,
   resolved     INTEGER NOT NULL,
   frameVersion INTEGER NOT NULL,
-  createdAt    TEXT    NOT NULL
+  createdAt    TEXT    NOT NULL,
+  deletedAt    TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_comments_frameId   ON comments(frameId);
-CREATE INDEX IF NOT EXISTS idx_comments_createdAt ON comments(createdAt);
+CREATE TABLE IF NOT EXISTS counters (
+  name  TEXT    PRIMARY KEY,
+  value INTEGER NOT NULL
+);
+
+`;
+
+// Indexes are created after migrate(): CREATE TABLE IF NOT EXISTS is a no-op on a db written by
+// an older build, so a column this indexes may not exist until the ALTER has run.
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_comments_frameId    ON comments(frameId);
+CREATE INDEX IF NOT EXISTS idx_comments_createdAt  ON comments(createdAt);
+CREATE INDEX IF NOT EXISTS idx_comments_updatedSeq ON comments(updatedSeq);
 `;
 
 type FrameRow = {
@@ -71,6 +91,8 @@ type FrameSummaryRow = Omit<FrameRow, "html"> & {
 };
 
 type CommentRow = {
+  seq: number;
+  updatedSeq: number;
   id: string;
   frameId: string;
   x: number;
@@ -81,7 +103,12 @@ type CommentRow = {
   resolved: number;
   frameVersion: number;
   createdAt: string;
+  deletedAt: string | null;
 };
+
+/** Columns the data model exposes; seq/updatedSeq/deletedAt are internal bookkeeping. */
+const COMMENT_COLUMNS =
+  "id, frameId, x, y, text, author, parentId, resolved, frameVersion, createdAt";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -102,6 +129,49 @@ export class Store {
     this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     if (path !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(SCHEMA);
+    this.migrate();
+    this.db.exec(INDEXES);
+  }
+
+  /**
+   * Brings a db written by an older build up to the current schema. Columns are added
+   * rather than recreated so an existing canvas keeps its frames and comments.
+   */
+  private migrate(): void {
+    const columns = new Set(
+      (this.db.query("PRAGMA table_info(comments)").all() as { name: string }[]).map((c) => c.name),
+    );
+    if (!columns.has("updatedSeq")) {
+      this.db.exec("ALTER TABLE comments ADD COLUMN updatedSeq INTEGER NOT NULL DEFAULT 0");
+      this.db.exec("UPDATE comments SET updatedSeq = seq WHERE updatedSeq = 0");
+    }
+    if (!columns.has("deletedAt")) {
+      this.db.exec("ALTER TABLE comments ADD COLUMN deletedAt TEXT");
+    }
+
+    const seeded = this.db.query("SELECT value FROM counters WHERE name = 'comment_tick'").get();
+    if (seeded === null) {
+      const row = this.db
+        .query("SELECT COALESCE(MAX(MAX(seq), MAX(updatedSeq)), 0) AS tick FROM comments")
+        .get() as { tick: number };
+      this.db
+        .query("INSERT INTO counters (name, value) VALUES ('comment_tick', $tick)")
+        .run({ $tick: row.tick });
+    }
+  }
+
+  /**
+   * One monotonic counter feeds both `seq` (creation) and `updatedSeq` (last mutation), so
+   * the two stay comparable and a cursor can ride `updatedSeq` alone. Any mutation — resolve,
+   * reopen, edit — lifts a comment above every cursor handed out before it, which is what
+   * makes a re-opened thread reach an agent that is polling with `since`.
+   */
+  private nextTick(): number {
+    const row = this.db
+      .query("UPDATE counters SET value = value + 1 WHERE name = 'comment_tick' RETURNING value")
+      .get() as { value: number } | null;
+    if (row === null) throw new Error("comment_tick counter is missing from the database");
+    return row.value;
   }
 
   close(): void {
@@ -148,24 +218,29 @@ export class Store {
     return frame;
   }
 
-  updateFrameHtml(frameId: string, html: string, name?: string): Frame {
+  updateFrameHtml(frameId: string, html: string, patch: UpdateFramePatch = {}): Frame {
     const existing = this.getFrame(frameId);
     const next: Frame = {
       ...existing,
       html,
-      name: name === undefined ? existing.name : name,
+      name: patch.name === undefined ? existing.name : patch.name,
+      width: patch.width === undefined ? existing.width : patch.width,
+      height: patch.height === undefined ? existing.height : patch.height,
       version: existing.version + 1,
       updatedAt: nowIso(),
     };
 
     this.db
       .query(
-        `UPDATE frames SET html = $html, name = $name, version = $version, updatedAt = $updatedAt
+        `UPDATE frames SET html = $html, name = $name, width = $width, height = $height,
+                           version = $version, updatedAt = $updatedAt
          WHERE id = $id`,
       )
       .run({
         $html: next.html,
         $name: next.name,
+        $width: next.width,
+        $height: next.height,
         $version: next.version,
         $updatedAt: next.updatedAt,
         $id: next.id,
@@ -188,8 +263,13 @@ export class Store {
     const rows = this.db
       .query(
         `SELECT f.id, f.name, f.width, f.height, f.x, f.y, f.version, f.createdAt, f.updatedAt,
-                (SELECT COUNT(*) FROM comments c WHERE c.frameId = f.id) AS commentCount,
-                (SELECT COUNT(*) FROM comments c WHERE c.frameId = f.id AND c.resolved = 0) AS unresolvedCount
+                (SELECT COUNT(*) FROM comments c
+                  WHERE c.frameId = f.id AND c.deletedAt IS NULL) AS commentCount,
+                -- Only thread roots count as open feedback, so this matches the number the
+                -- human sees in the sidebar instead of also counting the agent's own replies.
+                (SELECT COUNT(*) FROM comments c
+                  WHERE c.frameId = f.id AND c.deletedAt IS NULL
+                    AND c.resolved = 0 AND c.parentId IS NULL) AS unresolvedCount
          FROM frames f
          ORDER BY f.x ASC, f.createdAt ASC`,
       )
@@ -214,6 +294,9 @@ export class Store {
       );
     }
 
+    // Threads are exactly one level deep: the canvas renders roots as pins and their direct
+    // replies inside the thread, so a reply-to-a-reply would render nowhere. Replying to a
+    // reply joins its thread instead of nesting under it.
     const comment: Comment = {
       id: newCommentId(),
       frameId,
@@ -221,18 +304,20 @@ export class Store {
       y,
       text,
       author,
-      parentId: parent === null ? null : parent.id,
+      parentId: parent === null ? null : (parent.parentId ?? parent.id),
       resolved: false,
       frameVersion: frame.version,
       createdAt: nowIso(),
     };
 
+    const tick = this.nextTick();
     this.db
       .query(
-        `INSERT INTO comments (id, frameId, x, y, text, author, parentId, resolved, frameVersion, createdAt)
-         VALUES ($id, $frameId, $x, $y, $text, $author, $parentId, $resolved, $frameVersion, $createdAt)`,
+        `INSERT INTO comments (seq, updatedSeq, id, frameId, x, y, text, author, parentId, resolved, frameVersion, createdAt)
+         VALUES ($seq, $seq, $id, $frameId, $x, $y, $text, $author, $parentId, $resolved, $frameVersion, $createdAt)`,
       )
       .run({
+        $seq: tick,
         $id: comment.id,
         $frameId: comment.frameId,
         $x: comment.x,
@@ -249,7 +334,9 @@ export class Store {
   }
 
   getComment(id: string): Comment {
-    const row = this.db.query("SELECT * FROM comments WHERE id = ?").get(id) as CommentRow | null;
+    const row = this.db
+      .query(`SELECT ${COMMENT_COLUMNS} FROM comments WHERE id = ? AND deletedAt IS NULL`)
+      .get(id) as CommentRow | null;
     if (row === null) throw new Error(`unknown comment: ${id}`);
     return toComment(row);
   }
@@ -271,13 +358,19 @@ export class Store {
       where.push("resolved = 0");
     }
     if (filter.since !== undefined) {
-      where.push("seq > $sinceSeq");
-      params.$sinceSeq = this.resolveSinceSeq(filter.since);
+      const since = this.resolveSince(filter.since);
+      if (since.kind === "seq") {
+        where.push("updatedSeq > $sinceSeq");
+        params.$sinceSeq = since.value;
+      } else {
+        where.push("createdAt > $sinceAt");
+        params.$sinceAt = since.value;
+      }
     }
+    where.push("deletedAt IS NULL");
 
-    const clause = where.length === 0 ? "" : `WHERE ${where.join(" AND ")}`;
     const rows = this.db
-      .query(`SELECT * FROM comments ${clause} ORDER BY seq ASC`)
+      .query(`SELECT ${COMMENT_COLUMNS} FROM comments WHERE ${where.join(" AND ")} ORDER BY updatedSeq ASC`)
       .all(params) as CommentRow[];
     return rows.map(toComment);
   }
@@ -296,20 +389,44 @@ export class Store {
     };
 
     this.db
-      .query("UPDATE comments SET resolved = $resolved, text = $text WHERE id = $id")
-      .run({ $resolved: next.resolved ? 1 : 0, $text: next.text, $id: id });
+      .query(
+        "UPDATE comments SET resolved = $resolved, text = $text, updatedSeq = $tick WHERE id = $id",
+      )
+      .run({ $resolved: next.resolved ? 1 : 0, $text: next.text, $id: id, $tick: this.nextTick() });
+
+    // Resolving a thread resolves its replies too, otherwise the agent's own reply stays
+    // open forever and every poll keeps reporting feedback that nobody is waiting on.
+    if (resolved !== undefined && existing.parentId === null) {
+      this.db
+        .query(
+          "UPDATE comments SET resolved = $resolved, updatedSeq = $tick WHERE parentId = $id AND deletedAt IS NULL",
+        )
+        .run({ $resolved: next.resolved ? 1 : 0, $id: id, $tick: this.nextTick() });
+    }
 
     return next;
   }
 
+  /**
+   * Soft delete: the row stays so a cursor pointing at it still resolves. An agent whose
+   * `since` names a comment the human has since deleted keeps polling instead of erroring
+   * out on every retry with no way back.
+   */
   deleteComment(id: string): void {
-    const changes = this.db.query("DELETE FROM comments WHERE id = ?").run(id).changes;
-    if (changes === 0) throw new Error(`unknown comment: ${id}`);
+    this.getComment(id);
+    const at = nowIso();
+    this.db
+      .query(
+        "UPDATE comments SET deletedAt = $at, updatedSeq = $tick WHERE (id = $id OR parentId = $id) AND deletedAt IS NULL",
+      )
+      .run({ $at: at, $id: id, $tick: this.nextTick() });
   }
 
   counts(): { frames: number; comments: number } {
     const frames = this.db.query("SELECT COUNT(*) AS n FROM frames").get() as { n: number };
-    const comments = this.db.query("SELECT COUNT(*) AS n FROM comments").get() as { n: number };
+    const comments = this.db
+      .query("SELECT COUNT(*) AS n FROM comments WHERE deletedAt IS NULL")
+      .get() as { n: number };
     return { frames: frames.n, comments: comments.n };
   }
 
@@ -319,23 +436,26 @@ export class Store {
    * `since` is an ISO timestamp or a comment id. Both collapse to a seq threshold so
    * "strictly after" stays exact even when several comments share a millisecond.
    */
-  private resolveSinceSeq(since: string): number {
+  private resolveSince(since: string): { kind: "seq" | "time"; value: string | number } {
     if (isCommentId(since)) {
-      const row = this.db.query("SELECT seq FROM comments WHERE id = ?").get(since) as
-        | { seq: number }
+      // Deliberately not filtered on deletedAt — a cursor must survive its comment's deletion.
+      const row = this.db.query("SELECT updatedSeq FROM comments WHERE id = ?").get(since) as
+        | { updatedSeq: number }
         | null;
       if (row === null) throw new Error(`unknown comment id in \`since\`: ${since}`);
-      return row.seq;
+      return { kind: "seq", value: row.updatedSeq };
     }
 
     const at = new Date(since);
     if (Number.isNaN(at.getTime())) {
       throw new Error(`\`since\` must be an ISO timestamp or a comment id, got: ${since}`);
     }
-    const row = this.db
-      .query("SELECT MAX(seq) AS seq FROM comments WHERE createdAt <= ?")
-      .get(at.toISOString()) as { seq: number | null };
-    return row.seq === null ? 0 : row.seq;
+    // A timestamp is compared against createdAt directly rather than collapsed to a seq
+    // threshold. Deriving a threshold from a max-over-timestamps steps past comments that share
+    // the boundary millisecond, and a writer that computes createdAt and then waits on the lock
+    // can land an earlier createdAt at a later tick — either one silently loses a comment.
+    // Comparing timestamps keeps the meaning exactly "created after this instant".
+    return { kind: "time", value: at.toISOString() };
   }
 
   private nextFrameX(): number {

@@ -70,7 +70,7 @@ describe("frames", () => {
     expect(updated.createdAt).toBe(frame.createdAt);
     expect(updated.updatedAt > frame.updatedAt).toBe(true);
 
-    const again = s.updateFrameHtml(frame.id, "<p>v3</p>", "Home v3");
+    const again = s.updateFrameHtml(frame.id, "<p>v3</p>", { name: "Home v3" });
     expect(again.version).toBe(3);
     expect(again.name).toBe("Home v3");
     expect(s.getFrame(frame.id)).toEqual(again);
@@ -346,5 +346,157 @@ describe("persistence", () => {
     second.close();
 
     for (const suffix of ["", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
+  });
+});
+
+// Regressions for the review findings — each of these shipped broken once.
+describe("threads", () => {
+  test("replying to a reply joins the thread instead of nesting under it", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const root = comment(s, frame.id, "why is this blue?");
+    const humanReply = s.createComment({
+      frameId: frame.id,
+      x: root.x,
+      y: root.y,
+      text: "and the padding is off",
+      parentId: root.id,
+    });
+    // The agent naturally replies to the newest message, which is itself a reply. A grandchild
+    // would render nowhere: the canvas draws roots as pins and only direct replies inside them.
+    const agentReply = s.createComment({
+      frameId: frame.id,
+      x: root.x,
+      y: root.y,
+      text: "switching it to ink and tightening the padding",
+      parentId: humanReply.id,
+      author: "agent",
+    });
+
+    expect(agentReply.parentId).toBe(root.id);
+    const inThread = s.listComments({ frameId: frame.id }).filter((c) => c.parentId === root.id);
+    expect(inThread.map((c) => c.id)).toEqual([humanReply.id, agentReply.id]);
+    s.close();
+  });
+
+  test("resolving a thread resolves its replies, so the poll goes quiet", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const root = comment(s, frame.id, "too small");
+    s.createComment({
+      frameId: frame.id,
+      x: root.x,
+      y: root.y,
+      text: "bumped to 16px",
+      parentId: root.id,
+      author: "agent",
+    });
+
+    s.updateComment(root.id, { resolved: true });
+    expect(s.listComments()).toHaveLength(0);
+    expect(s.listComments({ includeResolved: true })).toHaveLength(2);
+    s.close();
+  });
+
+  test("unresolvedCount counts open threads, not the agent's own replies", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const root = comment(s, frame.id, "open question");
+    s.createComment({
+      frameId: frame.id,
+      x: root.x,
+      y: root.y,
+      text: "on it",
+      parentId: root.id,
+      author: "agent",
+    });
+
+    const [summary] = s.listFrames();
+    if (summary === undefined) throw new Error("no frame summary");
+    expect([summary.commentCount, summary.unresolvedCount]).toEqual([2, 1]);
+
+    s.updateComment(root.id, { resolved: true });
+    const [afterResolve] = s.listFrames();
+    if (afterResolve === undefined) throw new Error("no frame summary");
+    expect(afterResolve.unresolvedCount).toBe(0);
+    s.close();
+  });
+});
+
+describe("cursor durability", () => {
+  test("a cursor whose comment the human deleted keeps working", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const first = comment(s, frame.id, "first");
+    s.deleteComment(first.id);
+
+    // The agent is still holding `first.id` from an earlier poll. It must not be stranded.
+    expect(s.listComments({ since: first.id })).toHaveLength(0);
+    const second = comment(s, frame.id, "second");
+    expect(s.listComments({ since: first.id }).map((c) => c.id)).toEqual([second.id]);
+    s.close();
+  });
+
+  test("deleting a comment hides it and its replies from every read", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const root = comment(s, frame.id, "root");
+    s.createComment({ frameId: frame.id, x: 1, y: 2, text: "reply", parentId: root.id });
+
+    s.deleteComment(root.id);
+    expect(s.listComments({ includeResolved: true })).toHaveLength(0);
+    expect(s.counts().comments).toBe(0);
+    expect(() => s.getComment(root.id)).toThrow(/unknown comment/);
+    s.close();
+  });
+
+  test("reopening a resolved comment re-delivers it to a cursor past it", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const a = comment(s, frame.id, "a");
+    const b = comment(s, frame.id, "b");
+    s.updateComment(a.id, { resolved: true });
+
+    // Agent polls, ends up holding b as its cursor.
+    expect(s.listComments().map((c) => c.id)).toEqual([b.id]);
+    // Human re-raises a. Cursor rides updatedSeq, so the reopen lands after b.
+    s.updateComment(a.id, { resolved: false });
+    expect(s.listComments({ since: b.id }).map((c) => c.id)).toEqual([a.id]);
+    s.close();
+  });
+
+  test("an ISO `since` means strictly-after-that-instant, and the id cursor is the exact one", async () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const first = comment(s, frame.id, "first");
+    const second = comment(s, frame.id, "second");
+    // Force the millisecond collision two quick writes produce in practice.
+    s.db.query("UPDATE comments SET createdAt = ? WHERE id = ?").run(first.createdAt, second.id);
+
+    // A timestamp cannot separate two comments inside one millisecond — neither is "after" it.
+    // What matters is that the answer is consistent and never claims to have delivered them.
+    expect(s.listComments({ since: first.createdAt })).toHaveLength(0);
+    // The id cursor — the one get_comments hands back — separates them exactly.
+    expect(s.listComments({ since: first.id }).map((c) => c.id)).toEqual([second.id]);
+
+    await Bun.sleep(2); // a genuinely later millisecond, not another collision
+    const later = comment(s, frame.id, "later");
+    expect(s.listComments({ since: first.createdAt }).map((c) => c.id)).toEqual([later.id]);
+    s.close();
+  });
+});
+
+describe("frame resizing", () => {
+  test("push_html can resize a frame in place instead of silently keeping the old size", () => {
+    const s = store();
+    const frame = s.createFrame({ html: "<p>desktop</p>", width: 1280, height: 900 });
+    const mobile = s.updateFrameHtml(frame.id, "<p>mobile</p>", { width: 390, height: 844 });
+
+    expect([mobile.width, mobile.height]).toEqual([390, 844]);
+    expect(s.getFrame(frame.id).width).toBe(390);
+    // Omitted dimensions leave the frame alone.
+    const same = s.updateFrameHtml(frame.id, "<p>again</p>");
+    expect([same.width, same.height]).toEqual([390, 844]);
+    s.close();
   });
 });

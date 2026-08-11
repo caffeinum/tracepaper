@@ -207,7 +207,7 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
   const { html, name, frameId, width, height } = parsed.data;
 
   if (frameId !== undefined) {
-    const frame = ctx.store.updateFrameHtml(frameId, html, name);
+    const frame = ctx.store.updateFrameHtml(frameId, html, { name, width, height });
     ctx.bus.emit({ type: "frame.updated", frame: toFramePayload(frame) });
     return json(frame);
   }

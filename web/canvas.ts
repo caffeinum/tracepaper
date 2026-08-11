@@ -1087,6 +1087,20 @@ function setConn(state: "connecting" | "live" | "down"): void {
   if (label) label.textContent = state === "live" ? "live" : state === "down" ? "reconnecting" : "connecting";
 }
 
+/**
+ * SSE is the fast path, but the event bus lives in one process while the db is shared, so a write
+ * made by an agent attached to a *different* process never reaches this stream. A slow refetch
+ * makes the canvas self-heal in that topology instead of sitting silently stale forever.
+ */
+const RECONCILE_MS = 5000;
+
+function reconcile(): void {
+  setInterval(() => {
+    if (document.hidden) return;
+    loadAll().catch(fail);
+  }, RECONCILE_MS);
+}
+
 function subscribe(): void {
   const source = new EventSource("/api/events");
   let wasDown = false;
@@ -1165,3 +1179,4 @@ renderSidebar();
 zoomToFit();
 loadAll().catch(fail);
 subscribe();
+reconcile();

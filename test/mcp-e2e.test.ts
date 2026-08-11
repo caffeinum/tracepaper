@@ -377,9 +377,11 @@ test("reply_to_comment posts an agent reply into the human's thread", async () =
     const byAgent = await s.getComments({ frameId: frame.frameId, author: "agent" });
     expect(byAgent.comments.map((c) => c.id)).toEqual([reply.id]);
 
+    // two comments on the frame, but only one piece of open feedback: the agent's own reply
+    // is not something the human still owes an answer to, and the sidebar counts it the same way.
     expect(
       (await s.listFrames()).frames.map((f) => [f.commentCount, f.unresolvedCount]),
-    ).toEqual([[2, 2]]);
+    ).toEqual([[2, 1]]);
   });
 });
 

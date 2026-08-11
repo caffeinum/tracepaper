@@ -84,8 +84,8 @@ export const pushHtmlShape = {
   html: z.string().describe("Full HTML document or fragment, served verbatim."),
   name: z.string().min(1).optional().describe("Human label shown above the frame."),
   frameId: z.string().optional().describe("Existing frame to replace in place. Omit to create a new frame."),
-  width: z.number().positive().default(DEFAULT_FRAME_WIDTH),
-  height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
+  width: z.number().positive().optional().describe(`Frame width in css px (default ${DEFAULT_FRAME_WIDTH}). Resizes the frame when passed with frameId.`),
+  height: z.number().positive().optional().describe(`Frame height in css px (default ${DEFAULT_FRAME_HEIGHT}). Resizes the frame when passed with frameId.`),
 };
 export const PushHtmlInputSchema = z.object(pushHtmlShape);
 export type PushHtmlInput = z.infer<typeof PushHtmlInputSchema>;

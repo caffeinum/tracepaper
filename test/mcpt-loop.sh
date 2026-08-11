@@ -98,6 +98,12 @@ for tool in push_html get_comments list_frames resolve_comment reply_to_comment 
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
 
+step "list_frames with no arguments — mcpt omits the \`arguments\` key entirely"
+# Not reachable from our own SDK-based e2e: that client always sends `arguments: {}`, so a server
+# that rejects an absent key looks fine there and is unusable from here.
+NO_ARGS="$(mcp list_frames '{}')"
+want "$BASE" "$NO_ARGS" "list_frames is unreachable when the client sends no arguments"
+
 step "push_html — a frame the browser can render"
 PUSHED="$(mcp push_html '{"html":"<h1>mcpt drew this</h1>","name":"Mcpt"}')"
 FRAME="$(printf '%s' "$PUSHED" | grep -o 'frm_[0-9a-f]\{12\}' | head -1)"
@@ -152,13 +158,15 @@ step "resolve_comment — resolves the root and posts the note as an agent reply
 RESOLVED="$(mcp resolve_comment "{\"commentId\":\"$COMMENT\",\"note\":\"shipped in v2\"}")"
 want "$COMMENT" "$RESOLVED" "resolve_comment did not name the comment"
 AFTER="$(mcp get_comments "{\"frameId\":\"$FRAME\"}")"
-# A returned comment is listed as `- <id> `; a reply only *mentions* its parent as `(reply to <id>)`,
-# and resolving a root deliberately leaves its replies open, so match the list form.
+# A returned comment is listed as `- <id> `; a reply only *mentions* its parent as `(reply to <id>)`.
 avoid "- $COMMENT " "$AFTER" "the resolved comment is still returned by default"
 avoid "tighten the header" "$AFTER" "the resolved comment's text is still returned"
-want "shipped in v2" "$AFTER" "resolve_comment's note was never posted as an agent reply"
+# Resolving closes the whole thread, replies included — otherwise the agent's own note stays
+# open forever and every later poll reports it as feedback still waiting on someone.
+avoid "shipped in v2" "$AFTER" "the agent's own note is still open after resolving the thread"
 WITH_RESOLVED="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"includeResolved\":true}")"
 want "- $COMMENT " "$WITH_RESOLVED" "includeResolved does not bring the resolved comment back"
+want "shipped in v2" "$WITH_RESOLVED" "resolve_comment's note was never posted as an agent reply"
 
 step "delete_frame — removes the frame and cascades its comments"
 DELETED="$(mcp delete_frame "{\"frameId\":\"$FRAME\"}")"

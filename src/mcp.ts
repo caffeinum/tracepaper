@@ -121,7 +121,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         const frame =
           frameId === undefined
             ? store.createFrame({ html, name, width, height })
-            : store.updateFrameHtml(frameId, html, name);
+            : store.updateFrameHtml(frameId, html, { name, width, height });
         bus.emit({
           type: frameId === undefined ? "frame.created" : "frame.updated",
           frame: toFramePayload(frame),
