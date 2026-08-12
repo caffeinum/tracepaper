@@ -7,10 +7,10 @@ around, and drops pinned comments on the frames. The agent reads those comments 
 through MCP and replies inside the thread. That round trip — **draw → comment → read
 feedback** — is the whole product.
 
-One process serves both halves: an MCP server on stdio and the canvas web app over
-HTTP, sharing one SQLite database and one event bus, so an agent's `push_html` shows up
-in the human's open browser within seconds and a human's comment is readable by the agent on
-the next poll.
+One process serves both halves — an MCP server on stdio and the canvas web app over HTTP,
+sharing one SQLite database and one event bus. You start nothing by hand: your MCP client
+launches it, and the canvas comes up with it. An agent's `push_html` shows up in the human's
+open browser within seconds, and a human's comment is readable by the agent on the next poll.
 
 ## Install
 
@@ -33,18 +33,24 @@ below — or run it yourself:
 
 ## Run
 
+**One command runs everything.** There is no separate canvas server to start:
+
 ```sh
-bun run src/index.ts          # HTTP + MCP over stdio (what an MCP client launches)
-bun run src/index.ts serve    # HTTP only — the canvas without an agent attached
+bun run src/index.ts          # MCP over stdio AND the canvas over HTTP, one process
 ```
 
-The canvas is at <http://127.0.0.1:4321>. The resolved base URL is also written to
-`~/.paper-mcp/server.json`.
+That is what your MCP client launches, and it is the whole setup — the canvas comes up with
+it, at <http://127.0.0.1:4321> (the resolved URL is also written to `~/.paper-mcp/server.json`,
+and every tool returns it as `canvasUrl`).
 
-**Both at once is fine, and is the normal setup.** Leave `serve` running for your browser;
-when a client launches the stdio server against the same database, it detects the live
-canvas and joins it rather than starting a second one on another port. Agent pushes land in
-the tab you already have open, and `push_html` returns that tab's URL.
+```sh
+bun run src/index.ts serve    # optional: HTTP only, the canvas with no agent attached
+```
+
+`serve` drops the MCP half. It is a convenience for keeping a canvas open in your browser
+across agent restarts, not a requirement. Running both is safe: a second process started
+against the same database detects the live canvas and joins it instead of binding another
+port, so agent pushes land in the tab you already have open.
 
 | env | default | meaning |
 | --- | --- | --- |
