@@ -177,6 +177,10 @@ const statFrames = el<HTMLSpanElement>("stat-frames");
 const statOpen = el<HTMLSpanElement>("stat-open");
 const conn = el<HTMLDivElement>("conn");
 const toolComment = el<HTMLButtonElement>("tool-comment");
+const toolComments = el<HTMLButtonElement>("tool-comments");
+const commentsBadge = el<HTMLSpanElement>("tool-comments-badge");
+const sidebar = el<HTMLElement>("sidebar");
+const sidebarClose = el<HTMLButtonElement>("sidebar-close");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
 
 // ---------------------------------------------------------------- state
@@ -864,6 +868,25 @@ function renderSidebar(): void {
 
   statFrames.textContent = `${frames.size} ${frames.size === 1 ? "frame" : "frames"}`;
   statOpen.textContent = `${open} open`;
+
+  // The list is closed by default, so the badge is the only thing telling you there is
+  // feedback waiting behind it.
+  commentsBadge.textContent = String(open);
+  commentsBadge.hidden = open === 0;
+}
+
+// `HTMLElement.hidden` is boolean | "until-found", so the open state is tracked here rather
+// than read back off the DOM.
+let commentListOpen = false;
+
+function setCommentList(open: boolean): void {
+  commentListOpen = open;
+  sidebar.hidden = !open;
+  toolComments.setAttribute("aria-pressed", String(open));
+}
+
+function toggleCommentList(): void {
+  setCommentList(!commentListOpen);
 }
 
 function renderAll(): void {
@@ -987,6 +1010,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (panel) closePanel();
     else if (mode === "comment") setMode("idle");
+    else if (commentListOpen) setCommentList(false);
     else if (interactiveFrameId !== null) setInteractive(null);
     return;
   }
@@ -997,9 +1021,9 @@ window.addEventListener("keydown", (event) => {
     setMode(mode === "comment" ? "idle" : "comment");
     return;
   }
-  if (event.key === "b" || event.key === "B") {
+  if (event.key === "t" || event.key === "T") {
     event.preventDefault();
-    app.dataset["sidebar"] = app.dataset["sidebar"] === "hidden" ? "shown" : "hidden";
+    toggleCommentList();
     return;
   }
   if (event.key === " ") {
@@ -1022,6 +1046,8 @@ toolComment.addEventListener("click", () => {
   setInteractive(null);
   setMode(mode === "comment" ? "idle" : "comment");
 });
+toolComments.addEventListener("click", () => toggleCommentList());
+sidebarClose.addEventListener("click", () => setCommentList(false));
 el<HTMLButtonElement>("tool-zoom-in").addEventListener("click", () => {
   const { width, height } = stageSize();
   zoomAt({ x: width / 2, y: height / 2 }, 1.25);

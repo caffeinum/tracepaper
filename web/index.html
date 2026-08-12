@@ -10,23 +10,22 @@
   </head>
   <body>
     <div id="app">
-      <aside id="sidebar" class="sidebar">
-        <header class="sidebar-head">
-          <div class="brand">
-            <span class="brand-mark" aria-hidden="true"></span>
-            <span class="brand-name">paper<span class="brand-dim">-mcp</span></span>
-          </div>
-          <div id="conn" class="conn" data-state="connecting" title="event stream">
-            <span class="conn-dot" aria-hidden="true"></span>
-            <span class="conn-label">connecting</span>
-          </div>
-        </header>
-
-        <div class="sidebar-stats">
-          <span id="stat-frames">0 frames</span>
-          <span class="sep" aria-hidden="true">·</span>
-          <span id="stat-open">0 open</span>
+      <div class="chip brand-chip">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">paper<span class="brand-dim">-mcp</span></span>
+        <span class="chip-sep" aria-hidden="true"></span>
+        <span id="stat-frames" class="chip-stat">0 frames</span>
+        <div id="conn" class="conn" data-state="connecting" title="event stream">
+          <span class="conn-dot" aria-hidden="true"></span>
         </div>
+      </div>
+
+      <aside id="sidebar" class="sidebar" aria-label="Comments" hidden>
+        <header class="sidebar-head">
+          <span class="sidebar-title">Comments</span>
+          <span id="stat-open" class="sidebar-open">0 open</span>
+          <button id="sidebar-close" class="ghost-btn" type="button" title="Close (esc)">Close</button>
+        </header>
 
         <div id="comment-list" class="comment-list" role="list"></div>
 
@@ -65,6 +64,11 @@
           <button id="tool-comment" class="tool" type="button" title="Comment mode (c)" aria-pressed="false">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v9H9l-4 3v-3H4z" /></svg>
             <span>Comment</span>
+          </button>
+          <button id="tool-comments" class="tool" type="button" title="Comment list (t)" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14v2H3zm0 4h14v2H3zm0 4h9v2H3z" /></svg>
+            <span>List</span>
+            <span id="tool-comments-badge" class="badge" hidden>0</span>
           </button>
           <span class="tool-sep" aria-hidden="true"></span>
           <button id="tool-zoom-out" class="tool icon" type="button" title="Zoom out">
