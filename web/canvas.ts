@@ -141,20 +141,19 @@ async function api(path: string, init?: RequestInit): Promise<unknown> {
   return body;
 }
 
+/**
+ * The server refuses any write without this header — a cross-document request cannot set one,
+ * which is what stops a sandboxed frame (or any page the human is visiting) from posting
+ * comments as the human. See guardMutation in src/http.ts.
+ */
+const WRITE_HEADERS = { "content-type": "application/json", "x-paper-mcp": "1" };
+
 function postJson(path: string, body: unknown): Promise<unknown> {
-  return api(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return api(path, { method: "POST", headers: WRITE_HEADERS, body: JSON.stringify(body) });
 }
 
 function patchJson(path: string, body: unknown): Promise<unknown> {
-  return api(path, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return api(path, { method: "PATCH", headers: WRITE_HEADERS, body: JSON.stringify(body) });
 }
 
 // ---------------------------------------------------------------- dom refs
@@ -405,7 +404,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   kill.textContent = "✕";
   kill.addEventListener("click", () => {
     if (!window.confirm(`Delete "${frame.name}" and its comments?`)) return;
-    api(`/api/frames/${frame.id}`, { method: "DELETE" })
+    api(`/api/frames/${frame.id}`, { method: "DELETE", headers: WRITE_HEADERS })
       .then(() => {
         dropFrame(frame.id);
         closePanel();
@@ -605,7 +604,8 @@ function openComposer(frameId: string, localX: number, localY: number): void {
   const send = (text: string): void => {
     const trimmed = text.trim();
     if (trimmed.length === 0) return;
-    postJson("/api/comments", { frameId, x, y, text: trimmed, author: "human" })
+    // `author` is not sent: this route is the browser's, so the server stamps "human" itself.
+    postJson("/api/comments", { frameId, x, y, text: trimmed })
       .then((payload) => {
         const created = toComment(unwrap(payload, "comment"));
         comments.set(created.id, created);
@@ -697,7 +697,6 @@ function openThread(rootId: string): void {
       y: rootComment.y,
       text: trimmed,
       parentId: rootId,
-      author: "human",
     })
       .then((payload) => {
         const created = toComment(unwrap(payload, "comment"));
@@ -720,7 +719,7 @@ function openThread(rootId: string): void {
   remove.className = "btn quiet danger";
   remove.textContent = "Delete";
   remove.addEventListener("click", () => {
-    api(`/api/comments/${rootId}`, { method: "DELETE" })
+    api(`/api/comments/${rootId}`, { method: "DELETE", headers: WRITE_HEADERS })
       .then(() => {
         dropComment(rootId);
         closePanel();

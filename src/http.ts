@@ -127,11 +127,46 @@ type Context = {
   closeStream: Set<() => void>;
 };
 
+const MUTATING = new Set(["POST", "PATCH", "DELETE"]);
+
+/**
+ * A JSON body sent as text/plain is a CORS-*simple* request: no preflight, and the browser
+ * delivers it even though it will refuse to show the response. Reads are already protected by
+ * the same-origin policy; writes were not. Two ways in: any page the human happens to be
+ * visiting, and — the sharp one — the sandboxed frame itself, whose HTML an agent wrote from
+ * possibly-hostile input. Since `author` decides whether a comment reads as the human, that let
+ * pushed HTML put words in the human's mouth and feed them to the agent as instructions.
+ *
+ * A custom request header cannot be set by a simple request, so requiring one on every mutation
+ * proves the caller is our own fetch and not a cross-document write.
+ */
+const CANVAS_HEADER = "x-paper-mcp";
+
+function guardMutation(request: Request, method: string): Response | null {
+  if (!MUTATING.has(method)) return null;
+  if (request.headers.get(CANVAS_HEADER) !== null) return null;
+  return json(
+    { error: `writes require the ${CANVAS_HEADER} header (cross-origin write refused)` },
+    403,
+  );
+}
+
 async function route(ctx: Context): Promise<Response> {
   const { request } = ctx;
   const url = new URL(request.url);
-  const path = decodeURIComponent(url.pathname);
   const method = request.method;
+
+  const refused = guardMutation(request, method);
+  if (refused !== null) return refused;
+
+  let path: string;
+  try {
+    // Outside the main try: a malformed percent-escape throws URIError, which would otherwise
+    // escape as Bun's HTML error page instead of this server's `{error}` JSON contract.
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return json({ error: `malformed percent-encoding in path: ${url.pathname}` }, 400);
+  }
 
   try {
     if (path === "/api/health" && method === "GET") return handleHealth(ctx);
@@ -230,6 +265,13 @@ function handleFrameHtml(ctx: Context, id: string): Response {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      // The iframe's sandbox attribute only applies when this document is framed BY the canvas.
+      // Opened directly in a tab it would otherwise be an ordinary same-origin page, and this
+      // HTML was written by an agent that may have been fed hostile input — it could then read
+      // every frame over /api and write the canvas origin's storage. The CSP carries the same
+      // sandbox with the response, so it holds however the document is loaded.
+      "content-security-policy": "sandbox allow-scripts allow-forms allow-popups",
+      "x-content-type-options": "nosniff",
     },
   });
 }
@@ -239,7 +281,7 @@ function handleListComments(ctx: Context, url: URL): Response {
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
 
   const comments = ctx.store.listComments(parsed.data);
-  return json({ comments, cursor: cursorOf(comments) });
+  return json({ comments, cursor: ctx.store.nextCursor(comments, parsed.data.since) });
 }
 
 async function handleCreateComment(ctx: Context): Promise<Response> {
@@ -261,9 +303,13 @@ async function handleUpdateComment(ctx: Context, id: string): Promise<Response> 
   const parsed = UpdateCommentBodySchema.safeParse(body);
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
 
-  const comment = ctx.store.updateComment(id, parsed.data);
-  ctx.bus.emit({ type: "comment.updated", comment });
-  return json(comment);
+  // One event per changed row: resolving a thread also flips its replies, and an SSE-only
+  // client would otherwise keep showing them open inside a resolved thread.
+  const changed = ctx.store.updateComment(id, parsed.data);
+  for (const comment of changed) ctx.bus.emit({ type: "comment.updated", comment });
+  const [target] = changed;
+  if (target === undefined) throw new Error(`updateComment(${id}) changed nothing`);
+  return json(target);
 }
 
 function handleDeleteComment(ctx: Context, id: string): Response {
@@ -353,11 +399,6 @@ async function handleStatic(ctx: Context, path: string): Promise<Response> {
 }
 
 // ---------- helpers ----------
-
-function cursorOf(comments: Comment[]): string | null {
-  const last = comments.at(-1);
-  return last === undefined ? null : last.id;
-}
 
 /** Fragments get a minimal wrapper so links escape the sandboxed iframe; documents pass through. */
 function asDocument(html: string): string {

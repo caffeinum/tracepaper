@@ -190,14 +190,15 @@ describe("comments", () => {
     const frame = seedFrame(s);
     const c = comment(s, frame.id, "typo");
 
-    const edited = s.updateComment(c.id, { text: "fixed" });
-    expect(edited.text).toBe("fixed");
-    expect(edited.resolved).toBe(false);
+    const [edited] = s.updateComment(c.id, { text: "fixed" });
+    expect(edited?.text).toBe("fixed");
+    expect(edited?.resolved).toBe(false);
 
-    const resolved = s.updateComment(c.id, { resolved: true });
-    expect(resolved.resolved).toBe(true);
-    expect(resolved.text).toBe("fixed");
-    expect(s.getComment(c.id)).toEqual(resolved);
+    // A patch that names only `resolved` must leave the text alone.
+    const [resolved] = s.updateComment(c.id, { resolved: true });
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.text).toBe("fixed");
+    expect(s.getComment(c.id)).toEqual(resolved!);
 
     expect(() => s.updateComment("cmt_000000000000", { resolved: true })).toThrow(
       "unknown comment",
@@ -497,6 +498,113 @@ describe("frame resizing", () => {
     // Omitted dimensions leave the frame alone.
     const same = s.updateFrameHtml(frame.id, "<p>again</p>");
     expect([same.width, same.height]).toEqual([390, 844]);
+    s.close();
+  });
+});
+
+describe("cursor is a feed position, not a row pointer", () => {
+  test("mutating the cursor comment cannot skip past what the human wrote meanwhile", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const c1 = comment(s, frame.id, "first");
+    const c2 = comment(s, frame.id, "second");
+
+    // Agent polls and keeps the cursor it was handed.
+    const seen = s.listComments({ frameId: frame.id });
+    expect(seen.map((c) => c.id)).toEqual([c1.id, c2.id]);
+    const cursor = s.cursorOf(seen);
+    if (cursor === null) throw new Error("expected a cursor");
+
+    // Human types while the agent works.
+    const c3 = comment(s, frame.id, "and the footer is wrong");
+
+    // Agent closes out what it had. Resolving c2 bumps its updatedSeq above c3 — with an
+    // id-based cursor this is exactly where c3 became permanently invisible.
+    s.updateComment(c1.id, { resolved: true });
+    s.updateComment(c2.id, { resolved: true });
+
+    expect(s.listComments({ frameId: frame.id, since: cursor }).map((c) => c.id)).toEqual([c3.id]);
+    s.close();
+  });
+
+  test("a cursor survives deleting, editing and reopening the comments it covered", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const a = comment(s, frame.id, "a");
+    const cursor = s.cursorOf(s.listComments({ frameId: frame.id }));
+    if (cursor === null) throw new Error("expected a cursor");
+
+    s.updateComment(a.id, { resolved: true });
+    s.updateComment(a.id, { resolved: false }); // human re-raises it
+    expect(s.listComments({ frameId: frame.id, since: cursor }).map((c) => c.id)).toEqual([a.id]);
+
+    const b = comment(s, frame.id, "b");
+    const cursor2 = s.cursorOf(s.listComments({ frameId: frame.id, since: cursor }));
+    if (cursor2 === null) throw new Error("expected a second cursor");
+    s.deleteComment(b.id); // the comment the cursor covered is gone
+    const c = comment(s, frame.id, "c");
+    expect(s.listComments({ frameId: frame.id, since: cursor2 }).map((c) => c.id)).toEqual([c.id]);
+    s.close();
+  });
+
+  test("a malformed cursor fails loudly instead of silently returning everything", () => {
+    const s = store();
+    expect(() => s.listComments({ since: "cur_nope" })).toThrow(/malformed cursor/);
+    s.close();
+  });
+});
+
+describe("concurrent writers", () => {
+  test("a patch that names only resolved does not write back stale text", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const c = comment(s, frame.id, "v1");
+
+    s.updateComment(c.id, { text: "v2" });
+    s.updateComment(c.id, { resolved: true });
+    // Writing both columns from one stale read is how a concurrent resolve ate human edits.
+    expect(s.getComment(c.id).text).toBe("v2");
+    s.close();
+  });
+
+  test("updateComment reports every row it changed, replies included", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    const root = comment(s, frame.id, "root");
+    const reply = s.createComment({
+      frameId: frame.id,
+      x: 1,
+      y: 2,
+      text: "on it",
+      parentId: root.id,
+      author: "agent",
+    });
+
+    // The canvas listens to these events; a reply left out stays visibly open in a closed thread.
+    const changed = s.updateComment(root.id, { resolved: true });
+    expect(changed.map((c) => c.id).sort()).toEqual([root.id, reply.id].sort());
+    expect(changed.every((c) => c.resolved)).toBe(true);
+    s.close();
+  });
+
+  test("frame html updates bump the version in SQL, never from a stale read", () => {
+    const s = store();
+    const frame = s.createFrame({ html: "<p>1</p>" });
+    const a = s.updateFrameHtml(frame.id, "<p>2</p>");
+    const b = s.updateFrameHtml(frame.id, "<p>3</p>");
+    expect([a.version, b.version]).toEqual([2, 3]);
+    expect(s.getFrame(frame.id).html).toBe("<p>3</p>");
+    s.close();
+  });
+});
+
+describe("size limits", () => {
+  test("oversized html and comment text are refused", () => {
+    const s = store();
+    const frame = seedFrame(s);
+    expect(() => s.createFrame({ html: "x".repeat(5_000_001) })).toThrow();
+    expect(() => s.createComment({ frameId: frame.id, x: 0, y: 0, text: "x".repeat(16_001) })).toThrow();
+    expect(() => s.createFrame({ html: "" })).toThrow(/must not be empty/);
     s.close();
   });
 });

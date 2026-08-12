@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Database } from "bun:sqlite";
 import { isCommentId, newCommentId, newFrameId } from "./ids.ts";
 import {
@@ -24,6 +25,15 @@ export type UpdateFramePatch = {
 };
 
 const FRAME_GAP = 120;
+/** Marks an opaque feed position, so `since` can tell a cursor from a comment id. */
+export const CURSOR_PREFIX = "cur_";
+/**
+ * Every write runs `.immediate()` — BEGIN IMMEDIATE. A deferred transaction takes the write
+ * lock only when it first writes, so two processes that both begin, both read, then both try to
+ * write deadlock and one gets SQLITE_BUSY straight away; `busy_timeout` cannot rescue it,
+ * because backing off would mean discarding reads the transaction already made. Taking the lock
+ * up front makes the second writer wait instead of fail.
+ */
 /** How long a write waits for another process's lock before failing loudly. */
 const BUSY_TIMEOUT_MS = 5000;
 
@@ -182,10 +192,21 @@ export class Store {
 
   createFrame(input: CreateFrameInput): Frame {
     const { html, name, width, height } = CreateFrameInputSchema.parse(input);
-    const id = newFrameId();
+    // The layout slot and the slot name are both read-then-written. Two processes on one db
+    // otherwise pick the same x and the same "Frame N", stacking one frame invisibly on another.
+    return this.db.transaction(() => this.insertFrame({ html, name, width, height })).immediate();
+  }
+
+  private insertFrame(input: {
+    html: string;
+    name: string | undefined;
+    width: number;
+    height: number;
+  }): Frame {
+    const { html, name, width, height } = input;
     const at = nowIso();
     const frame: Frame = {
-      id,
+      id: newFrameId(),
       name: name === undefined ? this.nextFrameName() : name,
       html,
       width,
@@ -219,34 +240,33 @@ export class Store {
   }
 
   updateFrameHtml(frameId: string, html: string, patch: UpdateFramePatch = {}): Frame {
-    const existing = this.getFrame(frameId);
-    const next: Frame = {
-      ...existing,
-      html,
-      name: patch.name === undefined ? existing.name : patch.name,
-      width: patch.width === undefined ? existing.width : patch.width,
-      height: patch.height === undefined ? existing.height : patch.height,
-      version: existing.version + 1,
-      updatedAt: nowIso(),
-    };
-
-    this.db
-      .query(
-        `UPDATE frames SET html = $html, name = $name, width = $width, height = $height,
-                           version = $version, updatedAt = $updatedAt
-         WHERE id = $id`,
-      )
-      .run({
-        $html: next.html,
-        $name: next.name,
-        $width: next.width,
-        $height: next.height,
-        $version: next.version,
-        $updatedAt: next.updatedAt,
-        $id: next.id,
-      });
-
-    return next;
+    return this.db.transaction(() => {
+      this.getFrame(frameId); // throws on an unknown id before anything is written
+      // `version = version + 1` in SQL, and only the named columns written, so two concurrent
+      // pushes to one frame cannot both read version v and both write v+1, losing one html.
+      const row = this.db
+        .query(
+          `UPDATE frames
+              SET html      = $html,
+                  name      = COALESCE($name, name),
+                  width     = COALESCE($width, width),
+                  height    = COALESCE($height, height),
+                  version   = version + 1,
+                  updatedAt = $updatedAt
+            WHERE id = $id
+        RETURNING *`,
+        )
+        .get({
+          $html: html,
+          $name: patch.name ?? null,
+          $width: patch.width ?? null,
+          $height: patch.height ?? null,
+          $updatedAt: nowIso(),
+          $id: frameId,
+        }) as FrameRow | null;
+      if (row === null) throw new Error(`unknown frame: ${frameId}`);
+      return FrameSchema.parse(row);
+    }).immediate();
   }
 
   getFrame(id: string): Frame {
@@ -285,7 +305,15 @@ export class Store {
   // ---------- comments ----------
 
   createComment(input: CreateCommentInput): Comment {
-    const { frameId, x, y, text, parentId, author } = CreateCommentInputSchema.parse(input);
+    const parsed = CreateCommentInputSchema.parse(input);
+    // The tick and the INSERT must land together. Apart, a reader can poll between them, take a
+    // cursor above the reserved tick, and never see the row when it finally commits — measured
+    // at 125 permanently invisible comments out of 1200 across three writers.
+    return this.db.transaction(() => this.insertComment(parsed)).immediate();
+  }
+
+  private insertComment(parsed: z.output<typeof CreateCommentInputSchema>): Comment {
+    const { frameId, x, y, text, parentId, author } = parsed;
     const frame = this.getFrame(frameId);
     const parent = parentId === undefined || parentId === null ? null : this.getComment(parentId);
     if (parent !== null && parent.frameId !== frameId) {
@@ -375,36 +403,51 @@ export class Store {
     return rows.map(toComment);
   }
 
-  updateComment(id: string, patch: UpdateCommentPatch): Comment {
-    const existing = this.getComment(id);
+  /** Returns every comment the patch changed: the target first, then any replies it cascaded to. */
+  updateComment(id: string, patch: UpdateCommentPatch): Comment[] {
     const { resolved, text } = UpdateCommentPatchSchema.parse(patch);
     if (resolved === undefined && text === undefined) {
       throw new Error(`updateComment(${id}) called with an empty patch`);
     }
-
-    const next: Comment = {
-      ...existing,
-      resolved: resolved === undefined ? existing.resolved : resolved,
-      text: text === undefined ? existing.text : text,
-    };
-
-    this.db
-      .query(
-        "UPDATE comments SET resolved = $resolved, text = $text, updatedSeq = $tick WHERE id = $id",
-      )
-      .run({ $resolved: next.resolved ? 1 : 0, $text: next.text, $id: id, $tick: this.nextTick() });
-
-    // Resolving a thread resolves its replies too, otherwise the agent's own reply stays
-    // open forever and every poll keeps reporting feedback that nobody is waiting on.
-    if (resolved !== undefined && existing.parentId === null) {
+    return this.db.transaction(() => {
+      const existing = this.getComment(id);
+      // Only the columns the patch names are written. Writing both from one stale read let a
+      // concurrent resolve put back the text as it was several edits ago, losing human edits.
       this.db
         .query(
-          "UPDATE comments SET resolved = $resolved, updatedSeq = $tick WHERE parentId = $id AND deletedAt IS NULL",
+          `UPDATE comments
+              SET resolved   = COALESCE($resolved, resolved),
+                  text       = COALESCE($text, text),
+                  updatedSeq = $tick
+            WHERE id = $id`,
         )
-        .run({ $resolved: next.resolved ? 1 : 0, $id: id, $tick: this.nextTick() });
-    }
+        .run({
+          $resolved: resolved === undefined ? null : resolved ? 1 : 0,
+          $text: text === undefined ? null : text,
+          $id: id,
+          $tick: this.nextTick(),
+        });
 
-    return next;
+      // Resolving a thread resolves its replies too, otherwise the agent's own reply stays
+      // open forever and every poll keeps reporting feedback that nobody is waiting on.
+      const cascaded: Comment[] =
+        resolved === undefined || existing.parentId !== null
+          ? []
+          : this.cascadeResolve(id, resolved);
+
+      return [this.getComment(id), ...cascaded];
+    }).immediate();
+  }
+
+  private cascadeResolve(rootId: string, resolved: boolean): Comment[] {
+    const rows = this.db
+      .query(
+        `UPDATE comments SET resolved = $resolved, updatedSeq = $tick
+          WHERE parentId = $id AND deletedAt IS NULL AND resolved != $resolved
+        RETURNING ${COMMENT_COLUMNS}`,
+      )
+      .all({ $resolved: resolved ? 1 : 0, $id: rootId, $tick: this.nextTick() }) as CommentRow[];
+    return rows.map(toComment);
   }
 
   /**
@@ -436,7 +479,41 @@ export class Store {
    * `since` is an ISO timestamp or a comment id. Both collapse to a seq threshold so
    * "strictly after" stays exact even when several comments share a millisecond.
    */
+  /**
+   * The cursor a read hands back. It is an opaque snapshot of *where the feed was*, not a
+   * pointer at a row: a comment id would be re-resolved through that row's live `updatedSeq`,
+   * so resolving or editing the cursor comment would drag the boundary forward over everything
+   * the human wrote in between — those comments then never come back, on any later poll.
+   */
+  /**
+   * The cursor to hand back for a read. An empty page must not reset the caller to null — that
+   * would send the next poll back to the beginning of the feed — so the position it was already
+   * at is echoed instead.
+   */
+  nextCursor(comments: Comment[], since: string | undefined): string | null {
+    const advanced = this.cursorOf(comments);
+    if (advanced !== null) return advanced;
+    return since !== undefined && since.startsWith(CURSOR_PREFIX) ? since : null;
+  }
+
+  cursorOf(comments: Comment[]): string | null {
+    if (comments.length === 0) return null;
+    const ids = comments.map((c) => c.id);
+    const row = this.db
+      .query(
+        `SELECT MAX(updatedSeq) AS seq FROM comments WHERE id IN (${ids.map(() => "?").join(",")})`,
+      )
+      .get(...ids) as { seq: number | null };
+    if (row.seq === null) throw new Error("cursorOf: none of the returned comments exist");
+    return `${CURSOR_PREFIX}${row.seq}`;
+  }
+
   private resolveSince(since: string): { kind: "seq" | "time"; value: string | number } {
+    if (since.startsWith(CURSOR_PREFIX)) {
+      const seq = Number(since.slice(CURSOR_PREFIX.length));
+      if (!Number.isInteger(seq) || seq < 0) throw new Error(`malformed cursor in \`since\`: ${since}`);
+      return { kind: "seq", value: seq };
+    }
     if (isCommentId(since)) {
       // Deliberately not filtered on deletedAt — a cursor must survive its comment's deletion.
       const row = this.db.query("SELECT updatedSeq FROM comments WHERE id = ?").get(since) as

@@ -4,6 +4,13 @@ import { COMMENT_ID_RE, FRAME_ID_RE } from "./ids.ts";
 export const DEFAULT_FRAME_WIDTH = 1280;
 export const DEFAULT_FRAME_HEIGHT = 900;
 
+/**
+ * Size ceilings. Unbounded html filled the db (100MB push → 147MB on disk) and an unbounded
+ * comment came back through get_comments verbatim, which is an agent's whole context window.
+ */
+export const MAX_HTML_BYTES = 5_000_000;
+export const MAX_COMMENT_CHARS = 16_000;
+
 // ---------- data model ----------
 
 export const AuthorSchema = z.enum(["human", "agent"]);
@@ -45,8 +52,13 @@ export type Comment = z.infer<typeof CommentSchema>;
 
 // ---------- store inputs ----------
 
+export const htmlField = z
+  .string()
+  .min(1, "html must not be empty — push the document you want the human to look at")
+  .max(MAX_HTML_BYTES, `html must be at most ${MAX_HTML_BYTES} bytes`);
+
 export const CreateFrameInputSchema = z.object({
-  html: z.string(),
+  html: htmlField,
   name: z.string().min(1).optional(),
   width: z.number().positive().default(DEFAULT_FRAME_WIDTH),
   height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
@@ -57,7 +69,7 @@ export const CreateCommentInputSchema = z.object({
   frameId: z.string(),
   x: z.number(),
   y: z.number(),
-  text: z.string().min(1),
+  text: z.string().min(1).max(MAX_COMMENT_CHARS),
   parentId: z.string().nullable().optional(),
   author: AuthorSchema.default("human"),
 });
@@ -81,7 +93,7 @@ export type CommentFilter = z.infer<typeof CommentFilterSchema>;
 // Raw shapes are what `McpServer.registerTool({ inputSchema })` wants.
 
 export const pushHtmlShape = {
-  html: z.string().describe("Full HTML document or fragment, served verbatim."),
+  html: htmlField.describe("Full HTML document or fragment, served verbatim."),
   name: z.string().min(1).optional().describe("Human label shown above the frame."),
   frameId: z.string().optional().describe("Existing frame to replace in place. Omit to create a new frame."),
   width: z.number().positive().optional().describe(`Frame width in css px (default ${DEFAULT_FRAME_WIDTH}). Resizes the frame when passed with frameId.`),
@@ -152,15 +164,22 @@ export type ListFramesResult = z.infer<typeof ListFramesResultSchema>;
 export const CreateOrUpdateFrameBodySchema = PushHtmlInputSchema;
 export type CreateOrUpdateFrameBody = z.infer<typeof CreateOrUpdateFrameBodySchema>;
 
-/** POST /api/comments */
-export const CreateCommentBodySchema = z.object({
-  frameId: z.string(),
-  x: z.number(),
-  y: z.number(),
-  text: z.string().min(1),
-  parentId: z.string().nullable().optional(),
-  author: AuthorSchema.default("human"),
-});
+/**
+ * POST /api/comments — the browser's route, so `author` is NOT accepted here. It is always
+ * "human". Agent-authored comments come from the MCP tools, which are the only caller that can
+ * legitimately claim authorship; letting a request pick made "human" a value that agent-written
+ * HTML could forge straight into the agent's own feedback stream.
+ */
+export const CreateCommentBodySchema = z
+  .object({
+    frameId: z.string(),
+    x: z.number(),
+    y: z.number(),
+    text: z.string().min(1).max(MAX_COMMENT_CHARS, `comment text must be at most ${MAX_COMMENT_CHARS} characters`),
+    parentId: z.string().nullable().optional(),
+  })
+  // strict, so an attempt to set `author` is a loud 400 rather than a silently dropped key.
+  .strict();
 export type CreateCommentBody = z.infer<typeof CreateCommentBodySchema>;
 
 /** PATCH /api/comments/:id */

@@ -126,8 +126,16 @@ want "unknown frame: frm_000000000000" "$GHOST" "wrong error message"
 equal "$(health frames)" "1" "a bogus frameId created a frame anyway"
 
 step "human comment — posted over HTTP exactly as the browser does"
-POSTED="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' \
+# The x-paper-mcp header is what the canvas sends; without it the server refuses the write,
+# which is what stops a page the human is visiting — or agent-written HTML — posting as them.
+POSTED="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
   -d "{\"frameId\":\"$FRAME\",\"x\":412,\"y\":233,\"text\":\"tighten the header\"}")"
+
+step "a write without that header is refused, so hostile frame html cannot speak as the human"
+DRIVEBY="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/comments" \
+  -H 'content-type: text/plain' \
+  -d "{\"frameId\":\"$FRAME\",\"x\":1,\"y\":1,\"text\":\"drive-by\"}")"
+equal "$DRIVEBY" "403" "a cross-document simple POST was accepted"
 COMMENT="$(printf '%s' "$POSTED" | json id)"
 want "cmt_" "$COMMENT" "no commentId in POST /api/comments output: $POSTED"
 equal "$(printf '%s' "$POSTED" | json author)" "human" "a canvas comment is not authored by the human"
@@ -139,13 +147,28 @@ want "tighten the header" "$SEEN" "the comment text did not round-trip through m
 want "(412,233)" "$SEEN" "the pin coordinates did not round-trip"
 
 step 'cursor — polling with `since` returns only what is new'
-CAUGHT_UP="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$COMMENT\"}")"
-want "No new comments yet" "$CAUGHT_UP" "the cursor returned stale comments"
-curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' \
+# The cursor is an opaque feed position handed back in the result text, NOT a comment id: an id
+# is re-resolved through that row's live state, so resolving it would skip whatever the human
+# wrote in between and lose those comments permanently.
+CURSOR="$(printf '%s' "$SEEN" | grep -o 'cur_[0-9]\{1,\}' | head -1)"
+[ -n "$CURSOR" ] || fail "get_comments did not hand back a cur_ cursor: $SEEN"
+CAUGHT_UP="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
+want "Nothing new since that cursor" "$CAUGHT_UP" "the cursor returned stale comments"
+curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
   -d "{\"frameId\":\"$FRAME\",\"x\":10,\"y\":20,\"text\":\"and fix the footer\"}" >/dev/null
-FRESH="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$COMMENT\"}")"
+FRESH="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
 want "and fix the footer" "$FRESH" "the cursor did not surface the new comment"
 avoid "tighten the header" "$FRESH" "the cursor re-returned an already-seen comment"
+
+step "the cursor survives the agent resolving what it already read"
+# The regression that shipped once: resolving the comment a cursor names dragged the boundary
+# past everything written since, and those comments never came back on any later poll.
+LATER="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
+  -d "{\"frameId\":\"$FRAME\",\"x\":5,\"y\":5,\"text\":\"typed while you worked\"}" | json id)"
+mcp resolve_comment "{\"commentId\":\"$COMMENT\"}" >/dev/null
+STILL="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
+want "typed while you worked" "$STILL" "resolving a read comment made newer human notes invisible"
+mcp_err get_comments "{\"since\":\"cur_nope\"}" >/dev/null
 
 step "reply_to_comment — the agent talks back inside the thread"
 REPLIED="$(mcp reply_to_comment "{\"commentId\":\"$COMMENT\",\"text\":\"tightened it to 1.2\"}")"

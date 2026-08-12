@@ -162,16 +162,21 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
     ({ frameId, since, includeResolved, author }) => {
       try {
         const comments = store.listComments({ frameId, since, includeResolved, author });
-        const newest = comments.at(-1);
-        const result: GetCommentsResult = {
-          comments,
-          cursor: newest === undefined ? null : newest.id,
-        };
+        const result: GetCommentsResult = { comments, cursor: store.nextCursor(comments, since) };
 
+        const mine = comments.filter((c) => c.author === "agent").length;
+        const open = store
+          .listComments({ frameId })
+          .filter((c) => c.parentId === null && c.author === "human").length;
+
+        // An empty page does not mean "nothing to do" — it means nothing is new since the
+        // cursor. Saying so, with the open count, is what stops an agent reading it as "done".
         const header =
           comments.length === 0
-            ? "No new comments yet. Ask the human to look at the canvas, then poll again."
-            : `${comments.length} comment(s), oldest first. Pass since: "${result.cursor}" next poll.`;
+            ? since === undefined
+              ? `No comments yet. Ask the human to open ${canvasUrl()} and mark up the frame, then poll again.`
+              : `Nothing new since that cursor. ${open} thread(s) from the human are still unresolved — call get_comments without \`since\` to re-read them. If that is 0, the human has not written anything new: wait ~30s and poll again.`
+            : `${comments.length} comment(s)${mine === 0 ? "" : ` (${mine} your own replies)`}, oldest first. Pass since: "${result.cursor}" next poll. Canvas: ${canvasUrl()}`;
 
         return structuredResult([header, ...comments.map(describeComment)].join("\n"), result);
       } catch (error) {
@@ -228,8 +233,10 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
                 author: "agent",
               });
         if (reply !== null) bus.emit({ type: "comment.created", comment: reply });
-        const resolved = store.updateComment(commentId, { resolved: true });
-        bus.emit({ type: "comment.updated", comment: resolved });
+        const changed = store.updateComment(commentId, { resolved: true });
+        for (const comment of changed) bus.emit({ type: "comment.updated", comment });
+        const resolved = changed[0];
+        if (resolved === undefined) throw new Error(`resolve_comment(${commentId}) changed nothing`);
 
         return textResult(
           [

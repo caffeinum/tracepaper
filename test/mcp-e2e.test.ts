@@ -154,7 +154,7 @@ async function withServer(
       async humanComment(frameId, x, y, text) {
         const res = await fetch(`${base}/api/comments`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", "x-paper-mcp": "1" },
           body: JSON.stringify({ frameId, x, y, text }),
         });
         expect(res.status).toBe(201);
@@ -288,7 +288,7 @@ test("the product loop: a human pin posted over HTTP comes back through get_comm
     expect(seen.parentId).toBeNull();
     expect(seen.resolved).toBe(false);
     expect(seen.frameVersion).toBe(1);
-    expect(read.cursor).toBe(pinned.id);
+    expect(read.cursor).toMatch(/^cur_\d+$/);
 
     // the human-readable half an agent actually reads
     expect(textOf(await s.call("get_comments", { frameId: frame.frameId }))).toContain(
@@ -315,12 +315,13 @@ test("the cursor from get_comments returns only what is new on the next poll", a
 
     const poll1 = await s.getComments({ frameId: frame.frameId });
     expect(poll1.comments.map((c) => c.id)).toEqual([first.id]);
-    expect(poll1.cursor).toBe(first.id);
+    expect(poll1.cursor).toMatch(/^cur_\d+$/);
 
     // nothing new since the cursor
     const poll2 = await s.getComments({ frameId: frame.frameId, since: poll1.cursor });
     expect(poll2.comments).toEqual([]);
-    expect(poll2.cursor).toBeNull();
+    // An empty page echoes the position back rather than resetting the agent to the feed start.
+    expect(poll2.cursor).toBe(poll1.cursor);
 
     const second = await s.humanComment(frame.frameId, 2, 2, "second note");
 
@@ -328,7 +329,8 @@ test("the cursor from get_comments returns only what is new on the next poll", a
     const poll3 = await s.getComments({ frameId: frame.frameId, since: poll1.cursor });
     expect(poll3.comments.map((c) => c.id)).toEqual([second.id]);
     expect(poll3.comments.map((c) => c.text)).toEqual(["second note"]);
-    expect(poll3.cursor).toBe(second.id);
+    expect(poll3.cursor).toMatch(/^cur_\d+$/);
+    expect(poll3.cursor).not.toBe(poll1.cursor);
 
     // and the new cursor is caught up again
     expect((await s.getComments({ frameId: frame.frameId, since: poll3.cursor })).comments).toEqual(
