@@ -192,6 +192,7 @@ const view = { x: 0, y: 0, scale: 1 };
 
 let mode: "idle" | "comment" = "idle";
 let interactiveFrameId: string | null = null;
+let selectedFrameId: string | null = null;
 let spaceHeld = false;
 let hasFitted = false;
 
@@ -299,36 +300,63 @@ function resetZoom(): void {
   zoomAt({ x: width / 2, y: height / 2 }, 1 / view.scale);
 }
 
-function zoomToFit(): void {
-  const list = orderedFrames();
-  const { width, height } = stageSize();
-  if (list.length === 0) {
-    view.scale = 1;
-    view.x = width / 2;
-    view.y = height / 2;
-    applyView();
-    return;
-  }
-  let left = Infinity;
-  let top = Infinity;
-  let right = -Infinity;
-  let bottom = -Infinity;
+type Box = { left: number; top: number; right: number; bottom: number };
+
+function boundsOf(list: CanvasFrame[]): Box | null {
+  if (list.length === 0) return null;
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const frame of list) {
     left = Math.min(left, frame.x);
     top = Math.min(top, frame.y);
     right = Math.max(right, frame.x + frame.width);
     bottom = Math.max(bottom, frame.y + frame.height);
   }
+  return { left, top, right, bottom };
+}
+
+/** Frames a world-space box in the viewport. `max` caps the zoom so one small frame does not balloon. */
+function fitBox(box: Box, max = 1.5, animate = false): void {
+  const { width, height } = stageSize();
   const pad = 72;
   const scale = clamp(
-    Math.min((width - pad * 2) / (right - left), (height - pad * 2) / (bottom - top)),
+    Math.min((width - pad * 2) / (box.right - box.left), (height - pad * 2) / (box.bottom - box.top)),
     MIN_SCALE,
-    1.5,
+    max,
   );
+  const cx = (box.left + box.right) / 2;
+  const cy = (box.top + box.bottom) / 2;
+  if (animate) {
+    panTo(cx, cy, scale);
+    return;
+  }
   view.scale = scale;
-  view.x = width / 2 - ((left + right) / 2) * scale;
-  view.y = height / 2 - ((top + bottom) / 2) * scale;
+  view.x = width / 2 - cx * scale;
+  view.y = height / 2 - cy * scale;
   applyView();
+}
+
+function zoomToFit(): void {
+  const box = boundsOf(orderedFrames());
+  if (box === null) {
+    const { width, height } = stageSize();
+    view.scale = 1;
+    view.x = width / 2;
+    view.y = height / 2;
+    applyView();
+    return;
+  }
+  fitBox(box);
+}
+
+/** Fills the viewport with one frame — what you want when you step into it to actually use it. */
+function fitFrame(frameId: string, animate = true): void {
+  const frame = frames.get(frameId);
+  if (!frame) throw new Error(`cannot fit unknown frame: ${frameId}`);
+  fitBox(
+    { left: frame.x, top: frame.y, right: frame.x + frame.width, bottom: frame.y + frame.height },
+    2,
+    animate,
+  );
 }
 
 let tween = 0;
@@ -431,6 +459,10 @@ function buildFrame(frame: CanvasFrame): FrameNode {
     const point = screenToWorld(stagePoint(event));
     openComposer(current.id, point.x - current.x, point.y - current.y);
     setMode("idle");
+  });
+  catcher.addEventListener("click", () => {
+    if (mode === "comment") return;
+    setSelected(frame.id);
   });
   catcher.addEventListener("dblclick", () => {
     if (mode === "comment") return;
@@ -913,6 +945,16 @@ function setMode(next: "idle" | "comment"): void {
 function setInteractive(frameId: string | null): void {
   interactiveFrameId = frameId;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-interactive", id === frameId);
+  // Stepping into a frame means you want to use the page, so give it the whole viewport.
+  if (frameId !== null) {
+    setSelected(frameId);
+    fitFrame(frameId);
+  }
+}
+
+function setSelected(frameId: string | null): void {
+  selectedFrameId = frameId;
+  for (const [id, node] of frameNodes) node.root.classList.toggle("is-selected", id === frameId);
 }
 
 function updateCursor(): void {
@@ -1012,6 +1054,7 @@ stage.addEventListener("pointerdown", (event) => {
   if (interactiveFrameId !== null && (!(frameEl instanceof HTMLElement) || frameEl.dataset["frameId"] !== interactiveFrameId)) {
     setInteractive(null);
   }
+  if (!(frameEl instanceof HTMLElement)) setSelected(null);
 });
 
 function typingInField(): boolean {
@@ -1035,6 +1078,7 @@ window.addEventListener("keydown", (event) => {
     else if (mode === "comment") setMode("idle");
     else if (commentListOpen) setCommentList(false);
     else if (interactiveFrameId !== null) setInteractive(null);
+    else if (selectedFrameId !== null) setSelected(null);
     return;
   }
   if (typingInField() || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -1042,6 +1086,12 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     setInteractive(null);
     setMode(mode === "comment" ? "idle" : "comment");
+    return;
+  }
+  if (event.key === "f" || event.key === "F") {
+    event.preventDefault();
+    if (selectedFrameId !== null) fitFrame(selectedFrameId);
+    else zoomToFit();
     return;
   }
   if (event.key === "t" || event.key === "T") {
@@ -1155,6 +1205,24 @@ function reconcile(): void {
   });
 }
 
+/**
+ * The other end of the escape bridge served with each frame. The frame's origin is opaque, so
+ * `event.origin` is the useless string "null" — identity is established by matching the source
+ * window against a frame iframe we created, which nothing outside the canvas can forge.
+ */
+function listenForFrameEscape(): void {
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!isRecord(data) || data["__tracepaper"] !== "escape") return;
+    for (const [id, node] of frameNodes) {
+      if (node.iframe.contentWindow === event.source) {
+        if (interactiveFrameId === id) setInteractive(null);
+        return;
+      }
+    }
+  });
+}
+
 function subscribe(): void {
   const source = new EventSource("/api/events");
   let wasDown = false;
@@ -1234,3 +1302,4 @@ zoomToFit();
 loadAll().catch(fail);
 subscribe();
 reconcile();
+listenForFrameEscape();

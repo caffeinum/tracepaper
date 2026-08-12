@@ -193,11 +193,26 @@ describe("GET /f/:id", () => {
     expect(html).toContain('<base target="_blank">');
   });
 
-  test("serves a full document verbatim", async () => {
+  test("serves a full document intact, with only the escape bridge appended", async () => {
     const doc = "<!doctype html><html><head><title>t</title></head><body>ok</body></html>";
     const frame = await createFrame(doc);
-    const res = await fetch(`${base}/f/${frame.id}`);
-    expect(await res.text()).toBe(doc);
+    const served = await (await fetch(`${base}/f/${frame.id}`)).text();
+
+    // Everything the agent wrote survives, in order.
+    expect(served).toContain("<head><title>t</title></head>");
+    expect(served).toContain("ok");
+    // Plus one script, inside body: a sandboxed frame is cross-origin, so once focus is inside
+    // it `esc` never reaches the canvas. postMessage is the only way back out.
+    expect(served).toContain("__tracepaper");
+    expect(served.indexOf("__tracepaper")).toBeGreaterThan(served.indexOf("ok"));
+    expect(served.indexOf("__tracepaper")).toBeLessThan(served.indexOf("</body>"));
+  });
+
+  test("a document with no body tag still gets the escape bridge", async () => {
+    const frame = await createFrame("<!doctype html><html><p>no body tag</p></html>");
+    const served = await (await fetch(`${base}/f/${frame.id}`)).text();
+    expect(served).toContain("no body tag");
+    expect(served).toContain("__tracepaper");
   });
 
   test("unknown frame is 404", async () => {

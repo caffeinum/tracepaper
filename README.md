@@ -180,15 +180,19 @@ update. Each comment records the `frameVersion` it was left on.
   middle-drag pans, `⌘0` resets, `⌘1` zooms to fit.
 - `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
   at that frame-local coordinate and opens a composer. `esc` cancels.
+- Click a frame to select it (its label and outline pick up the accent). `f` fits the selection
+  to the viewport; `⌘1` fits everything.
 - Click a pin to open its thread — reply, resolve, or delete there.
 - Frames land in rows, wrapping about three wide, rather than marching off to the right forever.
   An agent can place them deliberately with `x`/`y`.
 - Sound inside a frame works once you interact with it. Autoplay on load is blocked by the
   browser's policy for sandboxed frames, which is the behaviour you want — a canvas full of
   frames cannot start making noise on its own.
-- Double-click a frame to interact with the page inside it. Leave with `esc`, by clicking
-  the canvas, or with the pill under the frame — once you click *into* the frame, focus is in a
-  sandboxed iframe of another origin and `esc` can no longer reach the canvas.
+- Double-click a frame to interact with the page inside it; entering also fits it to the
+  viewport, since that is what you want when you step in to use it. `esc` leaves — including
+  while your cursor is in a field inside the frame, which needs a small script served with each
+  frame, because a cross-origin sandbox otherwise swallows the keypress. Clicking the canvas or
+  the pill under the frame also leaves.
 - Chrome floats over a full-bleed canvas; nothing holds a permanent column. `t` (or the
   toolbar's **List**) opens the comment list on the right, grouped by frame with unresolved
   first — clicking an entry pans to its pin. It stays closed until you ask for it; the badge

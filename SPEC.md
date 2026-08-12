@@ -152,7 +152,7 @@ this session must read it back first or it silently discards the design.
 | GET | `/api/frames/:id` | frame incl. html |
 | POST | `/api/frames` | create/update (same shape as `push_html`) |
 | DELETE | `/api/frames/:id` | delete |
-| GET | `/f/:id` | raw frame html, served as `text/html` for the iframe `src` |
+| GET | `/f/:id` | frame html, served as `text/html` for the iframe `src`, with the escape bridge appended |
 | GET | `/api/comments?frameId=&since=&includeResolved=` | list |
 | POST | `/api/comments` | `{frameId,x,y,text,parentId?}` — strict; `author` is **not** accepted |
 | PATCH | `/api/comments/:id` | `{resolved?, text?}` |
@@ -182,6 +182,13 @@ Frames render in `<iframe src="/f/:id" sandbox="allow-scripts allow-forms allow-
 — no `allow-same-origin`, so pushed HTML cannot touch the canvas app or its storage.
 Comment clicks are captured by a transparent overlay above each iframe, so pointer
 events never need to reach into the frame.
+
+One small script is appended to every served frame — the **escape bridge**. Because the frame is
+a cross-origin sandbox, once focus is inside it every keystroke belongs to that document and the
+canvas never sees `esc`. postMessage is the one channel a sandboxed frame still has to its
+parent, so the frame reports the keypress and the canvas leaves interactive mode. The canvas
+establishes identity by matching `event.source` against a frame iframe it created — the frame's
+`event.origin` is the useless string `"null"`.
 
 `/f/:id` also sends `Content-Security-Policy: sandbox …` and `X-Content-Type-Options:
 nosniff`. The iframe attribute only binds when the canvas frames the document; opened

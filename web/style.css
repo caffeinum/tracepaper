@@ -521,8 +521,17 @@ code {
   box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-1);
 }
 
+.frame.is-selected .frame-body {
+  box-shadow: 0 0 0 2px var(--accent-line), var(--shadow-2);
+}
+
+/* Interactive is a stronger state than selected, so it wins the outline. */
 .frame.is-interactive .frame-body {
   box-shadow: 0 0 0 2px var(--accent), var(--shadow-2);
+}
+
+.frame.is-selected .frame-name {
+  color: var(--accent);
 }
 
 .frame iframe {

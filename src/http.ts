@@ -409,12 +409,34 @@ async function handleStatic(ctx: Context, path: string): Promise<Response> {
 // ---------- helpers ----------
 
 /** Fragments get a minimal wrapper so links escape the sandboxed iframe; documents pass through. */
+/**
+ * Escape cannot leave an interactive frame on its own: the frame is a cross-origin sandbox, so
+ * once focus is inside it every keystroke belongs to that document and the canvas never sees one.
+ * This is the only channel back — a sandboxed frame may still postMessage to its parent — so the
+ * frame reports the keypress and the canvas acts on it.
+ *
+ * Appended to every served frame, including full documents the agent authored. It touches nothing
+ * else: one listener, no globals, and it is inert outside an iframe.
+ */
+const ESCAPE_BRIDGE = `<script>
+(function(){
+  if (window.parent === window) return;
+  addEventListener("keydown", function (e) {
+    if (e.key === "Escape") parent.postMessage({ __tracepaper: "escape" }, "*");
+  }, true);
+})();
+</script>`;
+
 function asDocument(html: string): string {
-  if (/<html[\s>]/i.test(html)) return html;
+  if (/<html[\s>]/i.test(html)) {
+    return /<\/body\s*>/i.test(html)
+      ? html.replace(/<\/body\s*>/i, `${ESCAPE_BRIDGE}</body>`)
+      : html + ESCAPE_BRIDGE;
+  }
   return `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base target="_blank"></head>
-<body>${html}</body>
+<body>${html}${ESCAPE_BRIDGE}</body>
 </html>`;
 }
 
