@@ -3,7 +3,7 @@
 An MCP server that gives an AI agent a **canvas**. The agent pushes HTML frames onto
 it; a human scrolls the canvas in a browser and leaves comments on the frames; the
 agent reads those comments back through MCP. That round trip — *draw → comment →
-read feedback* — is the whole product. Nothing else from paper.design is in scope.
+read feedback* — is the whole product. Nothing from the commercial design-canvas tools beyond that is in scope.
 
 ## Stack
 
@@ -233,4 +233,4 @@ temp db and an ephemeral port.
 ## Non-goals
 
 Auth, multi-user presence, design tokens, component sync, code export, persistence
-beyond one machine, anything else paper.design does.
+beyond one machine, and everything else a full design tool does.

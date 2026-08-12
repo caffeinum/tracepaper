@@ -79,8 +79,8 @@ Paths must be absolute — the client sets its own working directory.
 Claude Code:
 
 ```sh
-claude mcp add paper -- bun run "$PWD/src/index.ts"     # run from the repo root
-claude mcp list                                          # paper: ✓ connected
+claude mcp add tracepaper -- bun run "$PWD/src/index.ts"     # run from the repo root
+claude mcp list                                          # tracepaper: ✓ connected
 ```
 
 Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the same JSON
@@ -89,7 +89,7 @@ Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the sa
 Once it is on npm this becomes the one-liner — no path, no clone:
 
 ```json
-{ "mcpServers": { "paper": { "command": "npx", "args": ["-y", "tracepaper"] } } }
+{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "tracepaper"] } } }
 ```
 
 From a clone, point at the entry file instead:
@@ -97,7 +97,7 @@ From a clone, point at the entry file instead:
 ```json
 {
   "mcpServers": {
-    "paper": {
+    "tracepaper": {
       "command": "bun",
       "args": ["run", "/absolute/path/to/tracepaper/src/index.ts"],
       "env": {

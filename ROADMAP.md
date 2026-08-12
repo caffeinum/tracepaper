@@ -14,9 +14,9 @@ filter; the server pushes until the client cancels. It **replaces** `resources/s
 and the HTTP GET endpoint.
 
 ```
--> subscriptions/listen { notifications: { resourceSubscriptions: ["paper://frames/frm_abc/comments"] } }
+-> subscriptions/listen { notifications: { resourceSubscriptions: ["tracepaper://frames/frm_abc/comments"] } }
 <- notifications/subscriptions/acknowledged   (first message, carries subscriptionId)
-<- notifications/resources/updated { uri: "paper://frames/frm_abc/comments" }
+<- notifications/resources/updated { uri: "tracepaper://frames/frm_abc/comments" }
 ```
 
 Constraint worth designing around: the filter is a closed set
@@ -82,7 +82,7 @@ v1 already follows.)
 1. **Tasks.** `push_html` optionally returns a task; comments drive `input_required`.
    Gate on the client declaring `io.modelcontextprotocol/tasks` — never return a task to a
    client that did not opt in.
-2. **Resources + `subscriptions/listen`.** `paper://frames/{id}/comments`, notification on
+2. **Resources + `subscriptions/listen`.** `tracepaper://frames/{id}/comments`, notification on
    change. Cheap once the event bus exists; removes polling for clients that support it.
 3. **`await_comments` long-poll.** Compatibility floor for everything else.
 
