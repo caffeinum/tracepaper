@@ -129,6 +129,12 @@ export const replyToCommentShape = {
 export const ReplyToCommentInputSchema = z.object(replyToCommentShape);
 export type ReplyToCommentInput = z.infer<typeof ReplyToCommentInputSchema>;
 
+export const getFrameShape = {
+  frameId: z.string(),
+};
+export const GetFrameInputSchema = z.object(getFrameShape);
+export type GetFrameInput = z.infer<typeof GetFrameInputSchema>;
+
 export const deleteFrameShape = {
   frameId: z.string(),
 };
@@ -146,9 +152,17 @@ export const PushHtmlResultSchema = z.object({
 });
 export type PushHtmlResult = z.infer<typeof PushHtmlResultSchema>;
 
+export const GetFrameResultSchema = FrameSchema.extend({
+  url: z.string(),
+  canvasUrl: z.string(),
+});
+export type GetFrameResult = z.infer<typeof GetFrameResultSchema>;
+
 export const GetCommentsResultSchema = z.object({
   comments: z.array(CommentSchema),
   cursor: z.string().nullable(),
+  /** Frames the returned comments sit on, so a coordinate and a staleness check need no second call. */
+  frames: z.array(FrameSummarySchema.pick({ id: true, name: true, width: true, height: true, version: true })),
 });
 export type GetCommentsResult = z.infer<typeof GetCommentsResultSchema>;
 

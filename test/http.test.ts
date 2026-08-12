@@ -139,9 +139,11 @@ describe("frames", () => {
   test("POST with unknown frameId is 404, never a silent create", async () => {
     const res = await post("/api/frames", { html: "<p>x</p>", frameId: "frm_000000000000" });
     expect(res.status).toBe(404);
-    expect((await res.json()) as { error: string }).toEqual({
-      error: "unknown frame: frm_000000000000",
-    });
+    // The message names the recovery call, so an agent that hits it knows what to do next
+    // instead of retrying the same id or creating a duplicate frame.
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain("unknown frame: frm_000000000000");
+    expect(error).toContain("list_frames");
   });
 
   test("POST with a bad body is 400 with the zod message", async () => {
@@ -201,9 +203,11 @@ describe("GET /f/:id", () => {
   test("unknown frame is 404", async () => {
     const res = await fetch(`${base}/f/frm_000000000000`);
     expect(res.status).toBe(404);
-    expect((await res.json()) as { error: string }).toEqual({
-      error: "unknown frame: frm_000000000000",
-    });
+    // The message names the recovery call, so an agent that hits it knows what to do next
+    // instead of retrying the same id or creating a duplicate frame.
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain("unknown frame: frm_000000000000");
+    expect(error).toContain("list_frames");
   });
 });
 

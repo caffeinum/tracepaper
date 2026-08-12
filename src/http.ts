@@ -281,7 +281,12 @@ function handleListComments(ctx: Context, url: URL): Response {
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
 
   const comments = ctx.store.listComments(parsed.data);
-  return json({ comments, cursor: ctx.store.nextCursor(comments, parsed.data.since) });
+  const touched = new Set(comments.map((c) => c.frameId));
+  const frames = ctx.store
+    .listFrames()
+    .filter((f) => touched.has(f.id))
+    .map(({ id, name, width, height, version }) => ({ id, name, width, height, version }));
+  return json({ comments, cursor: ctx.store.nextCursor(comments, parsed.data.since), frames });
 }
 
 async function handleCreateComment(ctx: Context): Promise<Response> {

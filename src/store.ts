@@ -28,13 +28,14 @@ const FRAME_GAP = 120;
 /** Marks an opaque feed position, so `since` can tell a cursor from a comment id. */
 export const CURSOR_PREFIX = "cur_";
 /**
- * Every write runs `.immediate()` — BEGIN IMMEDIATE. A deferred transaction takes the write
+ * How long a write waits for another process's lock before failing loudly.
+ *
+ * Every write also runs `.immediate()` — BEGIN IMMEDIATE. A deferred transaction takes the write
  * lock only when it first writes, so two processes that both begin, both read, then both try to
- * write deadlock and one gets SQLITE_BUSY straight away; `busy_timeout` cannot rescue it,
- * because backing off would mean discarding reads the transaction already made. Taking the lock
- * up front makes the second writer wait instead of fail.
+ * write deadlock and one gets SQLITE_BUSY straight away; this timeout cannot rescue that, because
+ * backing off would mean discarding reads the transaction already made. Taking the lock up front
+ * makes the second writer wait instead of fail.
  */
-/** How long a write waits for another process's lock before failing loudly. */
 const BUSY_TIMEOUT_MS = 5000;
 
 const SCHEMA = `
@@ -264,14 +265,14 @@ export class Store {
           $updatedAt: nowIso(),
           $id: frameId,
         }) as FrameRow | null;
-      if (row === null) throw new Error(`unknown frame: ${frameId}`);
+      if (row === null) throw new Error(`unknown frame: ${frameId} — call list_frames for the current frame ids, or omit frameId to create a new frame.`);
       return FrameSchema.parse(row);
     }).immediate();
   }
 
   getFrame(id: string): Frame {
     const row = this.db.query("SELECT * FROM frames WHERE id = ?").get(id) as FrameRow | null;
-    if (row === null) throw new Error(`unknown frame: ${id}`);
+    if (row === null) throw new Error(`unknown frame: ${id} — call list_frames for the current frame ids, or omit frameId to create a new frame.`);
     return FrameSchema.parse(row);
   }
 
@@ -299,7 +300,7 @@ export class Store {
 
   deleteFrame(id: string): void {
     const changes = this.db.query("DELETE FROM frames WHERE id = ?").run(id).changes;
-    if (changes === 0) throw new Error(`unknown frame: ${id}`);
+    if (changes === 0) throw new Error(`unknown frame: ${id} — call list_frames for the current frame ids, or omit frameId to create a new frame.`);
   }
 
   // ---------- comments ----------
@@ -365,7 +366,7 @@ export class Store {
     const row = this.db
       .query(`SELECT ${COMMENT_COLUMNS} FROM comments WHERE id = ? AND deletedAt IS NULL`)
       .get(id) as CommentRow | null;
-    if (row === null) throw new Error(`unknown comment: ${id}`);
+    if (row === null) throw new Error(`unknown comment: ${id} — call get_comments with includeResolved: true for the current comment ids.`);
     return toComment(row);
   }
 
@@ -519,7 +520,7 @@ export class Store {
       const row = this.db.query("SELECT updatedSeq FROM comments WHERE id = ?").get(since) as
         | { updatedSeq: number }
         | null;
-      if (row === null) throw new Error(`unknown comment id in \`since\`: ${since}`);
+      if (row === null) throw new Error(`unknown comment id in \`since\`: ${since} — that cursor is from a different canvas. Call get_comments with no \`since\` and use the cursor it returns.`);
       return { kind: "seq", value: row.updatedSeq };
     }
 

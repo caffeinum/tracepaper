@@ -31,6 +31,7 @@ const ENTRY = join(ROOT, "src", "index.ts");
 const TOOL_NAMES = [
   "delete_frame",
   "get_comments",
+  "get_frame",
   "list_frames",
   "push_html",
   "reply_to_comment",
@@ -177,7 +178,7 @@ async function withServer(
 
 // ---------- a ----------
 
-test("listTools returns exactly the six spec'd tools, each usable", async () => {
+test("listTools returns exactly the spec'd tools, each usable", async () => {
   await withServer(async (s) => {
     expect(await s.listTools()).toEqual(TOOL_NAMES);
   });
@@ -604,3 +605,45 @@ test("the server exits on stdin EOF alone, with no signal", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 }, LIFECYCLE_TEST_TIMEOUT_MS);
+
+// ---------- i ----------
+
+test("get_frame reads the current html back, so an update cannot silently discard it", async () => {
+  await withServer(async (s) => {
+    const original = "<main><h1>Pricing</h1><section>a lot of design</section></main>";
+    const frame = await s.pushHtml({ html: original, name: "Pricing" });
+
+    // The situation this exists for: a later session holds the frameId and nothing else.
+    const read = await s.call("get_frame", { frameId: frame.frameId });
+    expect(read.isError).toBeUndefined();
+    expect(textOf(read)).toContain(original);
+
+    const structuredFrame = read.structuredContent as { html: string; version: number };
+    expect(structuredFrame.html).toBe(original);
+    expect(structuredFrame.version).toBe(1);
+
+    const missing = await s.call("get_frame", { frameId: "frm_000000000000" });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain("list_frames");
+  });
+});
+
+test("get_comments reports the frame a note sits on and whether it has gone stale", async () => {
+  await withServer(async (s) => {
+    const frame = await s.pushHtml({ html: "<p>v1</p>", name: "Stale", width: 800, height: 600 });
+    await s.humanComment(frame.frameId, 100, 200, "move this up");
+
+    const fresh = textOf(await s.call("get_comments", { frameId: frame.frameId }));
+    expect(fresh).toContain('"Stale"');
+    expect(fresh).toContain("800x600");
+    expect(fresh).not.toContain("STALE");
+
+    // The agent replaces the design the note was written about.
+    await s.pushHtml({ frameId: frame.frameId, html: "<p>v2</p>" });
+    const stale = textOf(await s.call("get_comments", { frameId: frame.frameId }));
+    expect(stale).toContain("left on v1, frame is now v2 (STALE)");
+
+    const structured = await s.getComments({ frameId: frame.frameId });
+    expect(structured.frames.map((f) => [f.id, f.version])).toEqual([[frame.frameId, 2]]);
+  });
+});

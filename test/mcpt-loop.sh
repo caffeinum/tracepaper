@@ -92,9 +92,9 @@ curl -fsS "$BASE/api/health" >/dev/null || fail "http server never came up (see 
 
 # ---------- the loop ----------
 
-step "tools — all six are advertised to an outside client"
+step "tools — all seven are advertised to an outside client"
 TOOLS="$(PAPER_MCP_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
-for tool in push_html get_comments list_frames resolve_comment reply_to_comment delete_frame; do
+for tool in push_html get_comments get_frame list_frames resolve_comment reply_to_comment delete_frame; do
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
 
@@ -112,6 +112,10 @@ want "v1" "$PUSHED" "push_html did not report version 1"
 SERVED="$(curl -fsS "$BASE/f/$FRAME")"
 want "<h1>mcpt drew this</h1>" "$SERVED" "GET /f/$FRAME did not serve the pushed html"
 equal "$(health frames)" "1" "the long-lived server does not see the frame mcpt pushed"
+
+step "get_frame — the current html is readable back before an update replaces it"
+GOT="$(mcp get_frame "{\"frameId\":\"$FRAME\"}")"
+want "<h1>mcpt drew this</h1>" "$GOT" "get_frame did not return the frame's current html"
 
 step "push_html again with the same frameId — updates in place, no second frame"
 UPDATED="$(mcp push_html "{\"frameId\":\"$FRAME\",\"html\":\"<h1>revised</h1>\"}")"

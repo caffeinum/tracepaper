@@ -6,14 +6,18 @@ import {
   GetCommentsResultSchema,
   ListFramesResultSchema,
   PushHtmlResultSchema,
+  GetFrameResultSchema,
   deleteFrameShape,
   getCommentsShape,
+  getFrameShape,
   listFramesShape,
   pushHtmlShape,
   replyToCommentShape,
   resolveCommentShape,
   type Comment,
+  type FrameSummary,
   type GetCommentsResult,
+  type GetFrameResult,
   type ListFramesResult,
   type PushHtmlResult,
 } from "./types.ts";
@@ -31,7 +35,9 @@ export type McpServerDeps = {
 
 const PUSH_HTML_DESCRIPTION = [
   "Draw on the shared canvas the human is watching.",
-  "Push a full HTML document (or fragment) as a frame; it renders instantly in the human's browser.",
+  "Push a full HTML document (or fragment) as a frame; it appears in the human's open browser within",
+  "a few seconds, no reload needed. push_html REPLACES the frame's whole document — there is no",
+  "partial update, so call get_frame first if you did not author the current HTML this session.",
   "Omit frameId to add a new frame to the right of the last one. Pass frameId to replace that frame's",
   "HTML in place — the version bumps and existing comments survive. An unknown frameId is an error,",
   "never a silent create.",
@@ -44,12 +50,20 @@ const PUSH_HTML_DESCRIPTION = [
 
 const GET_COMMENTS_DESCRIPTION = [
   "Read the human's feedback left on the canvas. This is the other half of push_html.",
-  "Returns comments oldest-first plus a cursor: the newest returned comment's id.",
-  "Pass that cursor back as `since` on the next call to get only what is new — polling every few",
-  "seconds while the human reviews is the intended usage. `since` also accepts an ISO timestamp.",
-  "Resolved comments are excluded unless includeResolved is true; filter by frameId or by author",
-  '("human" for canvas notes, "agent" for your own replies).',
-  "An empty list means the human has not written anything new yet — wait and poll again.",
+  "Returns comments oldest-first plus an opaque `cursor` — pass it back as `since` next call to get",
+  "only what is new. Keep the cursor, not a timestamp: `since` accepts an ISO timestamp too, but",
+  "that matches only comments CREATED after it, so a comment the human edited or re-opened never",
+  "comes back.",
+  "",
+  "Cadence: humans take minutes, not seconds. After push_html, hand over canvasUrl and stop. Poll",
+  "about every 30s, and after a few empty polls say you are waiting and yield the turn rather than",
+  "spinning.",
+  "",
+  'Pass author: "human" while polling for feedback — otherwise your own reply_to_comment notes come',
+  "back under the very cursor you were just handed and read exactly like new human feedback.",
+  "Resolved comments are excluded unless includeResolved is true.",
+  "An empty list means nothing is new SINCE THE CURSOR — not that nothing is outstanding. The",
+  "header tells you how many threads are still unresolved.",
 ].join("\n");
 
 const LIST_FRAMES_DESCRIPTION = [
@@ -61,13 +75,24 @@ const LIST_FRAMES_DESCRIPTION = [
 const RESOLVE_COMMENT_DESCRIPTION = [
   "Mark a comment as done so it drops out of get_comments and the human's unresolved list.",
   "Pass `note` to also post it as an agent reply in that thread — the human then sees what you",
-  "changed instead of a note that silently disappears.",
+  "changed instead of a note that silently disappears. Resolving a thread resolves its replies",
+  "too, so your own note does not come back as fresh feedback.",
 ].join("\n");
 
 const REPLY_TO_COMMENT_DESCRIPTION = [
   "Post a threaded reply on a comment as the agent. This is how you talk back inside the canvas:",
-  "ask a clarifying question, or say what you are about to change. The reply appears live in the",
+  "ask a clarifying question, or say what you are about to change. The reply appears in the",
   "human's open thread. Use resolve_comment when the note is actually handled.",
+  "Your reply is itself unresolved, so it comes back on your next unfiltered poll — replying to an",
+  'already-resolved comment re-opens that conversation. Poll with author: "human" to avoid reading',
+  "your own replies as new feedback.",
+].join("\n");
+
+const GET_FRAME_DESCRIPTION = [
+  "Read a frame's current HTML back, plus its name, size and version.",
+  "Call this before push_html on a frame you did not author in this session — after a compaction,",
+  "or in a new session. push_html REPLACES the whole document, so pushing without reading first",
+  "silently discards whatever is already there.",
 ].join("\n");
 
 const DELETE_FRAME_DESCRIPTION = [
@@ -87,9 +112,19 @@ function structuredResult(text: string, structuredContent: Record<string, unknow
   return { content: [{ type: "text", text }], structuredContent };
 }
 
-function describeComment(comment: Comment): string {
+function describeComment(comment: Comment, frame: FrameSummary | undefined): string {
   const thread = comment.parentId === null ? "" : ` (reply to ${comment.parentId})`;
-  return `- ${comment.id}${thread} [${comment.author}] on ${comment.frameId} @ (${Math.round(comment.x)},${Math.round(comment.y)}) v${comment.frameVersion}: ${comment.text}`;
+  const where =
+    frame === undefined
+      ? `on ${comment.frameId}`
+      : `on ${comment.frameId} "${frame.name}" @ (${Math.round(comment.x)},${Math.round(comment.y)}) of ${frame.width}x${frame.height}`;
+  // A coordinate means nothing without the frame size, and a note left on v1 of a frame now at
+  // v3 was written about a design the agent has already replaced.
+  const age =
+    frame === undefined || frame.version === comment.frameVersion
+      ? `v${comment.frameVersion}`
+      : `left on v${comment.frameVersion}, frame is now v${frame.version} (STALE)`;
+  return `- ${comment.id}${thread} [${comment.author}] ${where} — ${age}: ${comment.text}`;
 }
 
 export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServer {
@@ -162,7 +197,19 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
     ({ frameId, since, includeResolved, author }) => {
       try {
         const comments = store.listComments({ frameId, since, includeResolved, author });
-        const result: GetCommentsResult = { comments, cursor: store.nextCursor(comments, since) };
+        const touched = new Set(comments.map((c) => c.frameId));
+        const byId = new Map(store.listFrames().filter((f) => touched.has(f.id)).map((f) => [f.id, f]));
+        const result: GetCommentsResult = {
+          comments,
+          cursor: store.nextCursor(comments, since),
+          frames: [...byId.values()].map(({ id, name, width, height, version }) => ({
+            id,
+            name,
+            width,
+            height,
+            version,
+          })),
+        };
 
         const mine = comments.filter((c) => c.author === "agent").length;
         const open = store
@@ -178,7 +225,10 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
               : `Nothing new since that cursor. ${open} thread(s) from the human are still unresolved — call get_comments without \`since\` to re-read them. If that is 0, the human has not written anything new: wait ~30s and poll again.`
             : `${comments.length} comment(s)${mine === 0 ? "" : ` (${mine} your own replies)`}, oldest first. Pass since: "${result.cursor}" next poll. Canvas: ${canvasUrl()}`;
 
-        return structuredResult([header, ...comments.map(describeComment)].join("\n"), result);
+        return structuredResult(
+          [header, ...comments.map((c) => describeComment(c, byId.get(c.frameId)))].join("\n"),
+          result,
+        );
       } catch (error) {
         return errorResult(error);
       }
@@ -273,6 +323,37 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         bus.emit({ type: "comment.created", comment: reply });
         return textResult(
           `Replied ${reply.id} to ${target.id} on frame ${target.frameId}. The human sees it live at ${canvasUrl()}`,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_frame",
+    {
+      title: "Read a frame's current HTML",
+      description: GET_FRAME_DESCRIPTION,
+      inputSchema: getFrameShape,
+      outputSchema: GetFrameResultSchema,
+    },
+    ({ frameId }) => {
+      try {
+        const frame = store.getFrame(frameId);
+        const result: GetFrameResult = {
+          ...frame,
+          url: frameUrl(frame.id),
+          canvasUrl: canvasUrl(),
+        };
+        return structuredResult(
+          [
+            `${frame.id} "${frame.name}" v${frame.version}, ${frame.width}x${frame.height}.`,
+            "Current HTML follows. push_html with this frameId replaces all of it.",
+            "",
+            frame.html,
+          ].join("\n"),
+          result,
         );
       } catch (error) {
         return errorResult(error);

@@ -9,7 +9,7 @@ feedback** — is the whole product.
 
 One process serves both halves: an MCP server on stdio and the canvas web app over
 HTTP, sharing one SQLite database and one event bus, so an agent's `push_html` shows up
-in the human's open browser instantly and a human's comment is readable by the agent on
+in the human's open browser within seconds and a human's comment is readable by the agent on
 the next poll.
 
 ## Install
@@ -54,6 +54,12 @@ the tab you already have open, and `push_html` returns that tab's URL.
 
 stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
+> **One canvas per machine, by default.** `~/.paper-mcp/paper.db` and port 4321 are global, so
+> two projects both wired with the config below share one canvas — project B's agent will call
+> `list_frames` and get project A's frames, and `push_html` with no `frameId` will land its work
+> next to them. To give a project its own, set `PAPER_MCP_DB` and `PAPER_MCP_PORT` in that
+> project's MCP config.
+
 ## MCP client config
 
 Paths must be absolute — the client sets its own working directory.
@@ -90,14 +96,17 @@ mcpt tools bun run src/index.ts
 mcpt call push_html --params '{"html":"<h1>hello</h1>","name":"Smoke test"}' bun run src/index.ts
 ```
 
-The second prints a `canvasUrl` — open it and the frame is there.
+The second prints a `canvasUrl` — open it and the frame is there. That frame is real and stays
+on your canvas: delete it from the pin menu, or
+`mcpt call delete_frame --params '{"frameId":"frm_…"}' bun run src/index.ts`.
 
 ## Tools
 
 | tool | what it does |
 | --- | --- |
 | `push_html` | `{html, name?, frameId?, width?, height?}` — draws a frame. No `frameId` creates one to the right of the last; with `frameId` it replaces that frame's HTML in place and bumps `version`, resizing it too if you pass `width`/`height`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
-| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first (newest last), resolved excluded by default. Returns `{comments, cursor}`; pass `cursor` back as `since` to poll for only what is new — that form is exact, and it also picks up a thread the human re-opened. `since` accepts an ISO timestamp too, but a timestamp cannot separate two comments written in the same millisecond, so prefer the cursor. |
+| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first, resolved excluded by default. Returns `{comments, cursor, frames}`; pass `cursor` back as `since` to poll for only what is new. Poll with `author: "human"` or your own replies come back looking like fresh feedback. `since` accepts an ISO timestamp too, but that matches only comments *created* after it — one the human edited or re-opened never comes back, and two written in the same millisecond cannot be separated. Prefer the cursor. |
+| `get_frame` | `{frameId}` → the frame's current HTML, name, size and version. Call it before `push_html` on a frame you did not author this session: `push_html` replaces the whole document, so pushing blind discards whatever is there. |
 | `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
 | `reply_to_comment` | `{commentId, text}` — posts a threaded reply as `"agent"`; it appears live in the human's open thread. |
 | `resolve_comment` | `{commentId, note?}` — closes the thread so it drops out of `get_comments`; `note` is also posted as an agent reply. Replies are resolved with their root, so your own note does not come back as fresh feedback on the next poll. |
@@ -121,7 +130,7 @@ get_comments { frameId: "frm_a1b2c3d4e5f6" }
                    x: 612, y: 340,
                    text: "the CTA is buried",
                    author: "human" }],
-      cursor: "cmt_9f8e…" }
+      cursor: "cur_7" }
 
 reply_to_comment { commentId: "cmt_9f8e…",
                    text: "moving it above the fold" }
@@ -135,7 +144,7 @@ resolve_comment { commentId: "cmt_9f8e…",
                   note: "CTA is now first" }
                                           the pin greys out
 
-get_comments { since: "cmt_9f8e…" }       ← poll with the cursor for what's new
+get_comments { since: "cur_7" }           ← poll with the cursor for what's new
 ```
 
 Comments are anchored to the frame, not to the DOM, so they survive every `push_html`
@@ -190,7 +199,7 @@ bun test               # store units + HTTP/SSE integration + MCP e2e over a rea
 bash test/mcpt-loop.sh # the same loop driven by the external `mcpt` CLI
 ```
 
-Expect `bun test` to report **80 pass / 0 fail across 3 files** in ~15s, and the script to
+Expect `bun test` to report **90 pass / 0 fail across 3 files** in ~15s, and the script to
 end with `OK — the loop works through mcpt`. Both exit non-zero on any failure, and both
 are safe to run repeatedly: every test gets its own temp database, its own `HOME` (so your
 real `~/.paper-mcp/server.json` is never touched), and an ephemeral port. Nothing needs
@@ -200,14 +209,14 @@ cleaning up between runs.
 
 | file | what it covers |
 | --- | --- |
-| `test/store.test.ts` | ids, cascades, `since` cursor semantics, version bumps |
+| `test/store.test.ts` | ids, cascades, cursor durability (a cursor must survive resolving, editing, re-opening and deleting what it covered), transactional writes, size caps |
 | `test/http.test.ts` | every route on an ephemeral port, plus SSE (one test idles 12s on purpose, to prove a stream outlives Bun's 10s default `idleTimeout`) |
 | `test/mcp-e2e.test.ts` | the MCP surface, from outside |
 
 `test/mcp-e2e.test.ts` never calls a handler directly. Each test spawns
 `bun src/index.ts` as a child process against a fresh temp-file database, connects the
 SDK's `Client` over `StdioClientTransport`, and drives the real loop: all six tools are
-advertised → `push_html` creates a frame whose `canvasUrl` and `/f/:id` are both live →
+advertised → `get_frame` reads a frame's HTML back before an update replaces it → `push_html` creates a frame whose `canvasUrl` and `/f/:id` are both live →
 pushing the same `frameId` bumps the version without adding a frame → a bogus `frameId`
 is a tool error that creates nothing → a comment POSTed over HTTP the way the browser
 does comes back through `get_comments` → the returned cursor yields only what is new →
