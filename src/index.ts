@@ -1,4 +1,7 @@
-import { readFileSync, writeFileSync } from "node:fs";
+#!/usr/bin/env bun
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { tolerateAbsentToolArguments } from "./compat.ts";
 import { loadConfig, type Config } from "./config.ts";
@@ -56,9 +59,27 @@ async function findLiveServer(config: Config): Promise<string | null> {
   }
 }
 
+/**
+ * The canvas app is a compiled bundle, and an MCP client launches `src/index.ts` directly —
+ * it never runs `bun run build:web`. Building it on first boot means a fresh clone works as
+ * soon as it is wired into a client, instead of serving a 500 to the human's first visit.
+ */
+async function ensureCanvasBundle(): Promise<void> {
+  const entry = fileURLToPath(new URL("../web/canvas.ts", import.meta.url));
+  const outdir = fileURLToPath(new URL("../web/dist/", import.meta.url));
+  if (existsSync(join(outdir, "canvas.js"))) return;
+
+  console.error("[paper-mcp] building the canvas bundle (first run)…");
+  const built = await Bun.build({ entrypoints: [entry], outdir, target: "browser", minify: true });
+  if (!built.success) {
+    throw new Error(`canvas bundle failed to build:\n${built.logs.map(String).join("\n")}`);
+  }
+}
+
 async function main(): Promise<void> {
   const mode = parseMode(process.argv.slice(2));
   const config = loadConfig();
+  await ensureCanvasBundle();
   const store = new Store(config.dbPath);
   const bus = new Bus();
 

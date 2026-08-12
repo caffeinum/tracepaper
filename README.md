@@ -14,14 +14,22 @@ the next poll.
 
 ## Install
 
-Requires [Bun](https://bun.sh) 1.3+.
+Requires [Bun](https://bun.sh) 1.3+. The repo is private, so install it by cloning —
+`bun add github:caffeinum/paper-mcp` will 404 without repo access.
 
 ```sh
-git clone https://github.com/caffeinum/paper-mcp
+git clone git@github.com:caffeinum/paper-mcp.git
 cd paper-mcp
 bun install
-bun run build:web     # builds web/dist/canvas.js — the server refuses to boot without it
 ```
+
+That is the whole install. There is no build step to remember: the canvas bundle is
+compiled on first boot if it is missing, so wiring the server into an MCP client works
+straight from a fresh clone. (`bun run build:web` still exists if you want it up front,
+and you need it after editing `web/canvas.ts`.)
+
+Then point your client at `src/index.ts` — see [MCP client config](#mcp-client-config)
+below — or run it yourself:
 
 ## Run
 
@@ -33,6 +41,11 @@ bun run src/index.ts serve    # HTTP only — the canvas without an agent attach
 The canvas is at <http://127.0.0.1:4321>. The resolved base URL is also written to
 `~/.paper-mcp/server.json`.
 
+**Both at once is fine, and is the normal setup.** Leave `serve` running for your browser;
+when a client launches the stdio server against the same database, it detects the live
+canvas and joins it rather than starting a second one on another port. Agent pushes land in
+the tab you already have open, and `push_html` returns that tab's URL.
+
 | env | default | meaning |
 | --- | --- | --- |
 | `PAPER_MCP_PORT` | `4321` | HTTP port. If busy, the next free port is used and reported. |
@@ -43,13 +56,17 @@ stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
 ## MCP client config
 
+Paths must be absolute — the client sets its own working directory.
+
 Claude Code:
 
 ```sh
-claude mcp add paper -- bun run /absolute/path/to/paper-mcp/src/index.ts
+claude mcp add paper -- bun run "$PWD/src/index.ts"     # run from the repo root
+claude mcp list                                          # paper: ✓ connected
 ```
 
-Raw JSON (`.mcp.json`, `claude_desktop_config.json`, or any MCP client):
+Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the same JSON
+(`.mcp.json`, `~/.cursor/mcp.json`, `claude_desktop_config.json`):
 
 ```json
 {
@@ -65,15 +82,25 @@ Raw JSON (`.mcp.json`, `claude_desktop_config.json`, or any MCP client):
 }
 ```
 
+Verify it end to end without restarting your agent, using the
+[`mcpt` CLI](https://github.com/f/mcp-tools) (`brew install f/mcptools/mcp`):
+
+```sh
+mcpt tools bun run src/index.ts
+mcpt call push_html --params '{"html":"<h1>hello</h1>","name":"Smoke test"}' bun run src/index.ts
+```
+
+The second prints a `canvasUrl` — open it and the frame is there.
+
 ## Tools
 
 | tool | what it does |
 | --- | --- |
-| `push_html` | `{html, name?, frameId?, width?, height?}` — draws a frame. No `frameId` creates one to the right of the last; with `frameId` it replaces that frame's HTML in place and bumps `version`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
-| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first (newest last), resolved excluded by default. Returns `{comments, cursor}`; pass `cursor` back as `since` to poll for only what is new. `since` also accepts an ISO timestamp. |
+| `push_html` | `{html, name?, frameId?, width?, height?}` — draws a frame. No `frameId` creates one to the right of the last; with `frameId` it replaces that frame's HTML in place and bumps `version`, resizing it too if you pass `width`/`height`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
+| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first (newest last), resolved excluded by default. Returns `{comments, cursor}`; pass `cursor` back as `since` to poll for only what is new — that form is exact, and it also picks up a thread the human re-opened. `since` accepts an ISO timestamp too, but a timestamp cannot separate two comments written in the same millisecond, so prefer the cursor. |
 | `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
 | `reply_to_comment` | `{commentId, text}` — posts a threaded reply as `"agent"`; it appears live in the human's open thread. |
-| `resolve_comment` | `{commentId, note?}` — marks the comment resolved so it drops out of `get_comments`; `note` is also posted as an agent reply. |
+| `resolve_comment` | `{commentId, note?}` — closes the thread so it drops out of `get_comments`; `note` is also posted as an agent reply. Replies are resolved with their root, so your own note does not come back as fresh feedback on the next poll. |
 | `delete_frame` | `{frameId}` — removes a frame and its comments. |
 
 ## The loop
@@ -122,8 +149,10 @@ update. Each comment records the `frameVersion` it was left on.
   at that frame-local coordinate and opens a composer. `esc` cancels.
 - Click a pin to open its thread — reply, resolve, or delete there.
 - Double-click a frame to interact with the page inside it; `esc` leaves.
-- The sidebar lists every comment grouped by frame, unresolved first; clicking one pans
-  to its pin.
+- Chrome floats over a full-bleed canvas; nothing holds a permanent column. `t` (or the
+  toolbar's **List**) opens the comment list on the right, grouped by frame with unresolved
+  first — clicking an entry pans to its pin. It stays closed until you ask for it; the badge
+  on the toolbar button is what tells you feedback is waiting.
 - Frames render in `<iframe sandbox="allow-scripts allow-forms allow-popups">` with no
   `allow-same-origin`, so pushed HTML cannot reach the canvas app or its storage.
 - SSE keeps it live: pushes, comments, replies, and resolutions all arrive without a
@@ -161,7 +190,7 @@ bun test               # store units + HTTP/SSE integration + MCP e2e over a rea
 bash test/mcpt-loop.sh # the same loop driven by the external `mcpt` CLI
 ```
 
-Expect `bun test` to report **72 pass / 0 fail across 3 files** in ~15s, and the script to
+Expect `bun test` to report **80 pass / 0 fail across 3 files** in ~15s, and the script to
 end with `OK — the loop works through mcpt`. Both exit non-zero on any failure, and both
 are safe to run repeatedly: every test gets its own temp database, its own `HOME` (so your
 real `~/.paper-mcp/server.json` is never touched), and an ephemeral port. Nothing needs
