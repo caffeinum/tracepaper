@@ -1063,14 +1063,14 @@ el<HTMLButtonElement>("tool-fit").addEventListener("click", () => zoomToFit());
 const MCP_CONFIG = `{
   "mcpServers": {
     "tracepaper": {
-      "command": "bunx",
-      "args": ["tracepaper"]
+      "command": "npx",
+      "args": ["-y", "github:caffeinum/tracepaper"]
     }
   }
 }`;
 
 el<HTMLPreElement>("config-snippet").textContent = MCP_CONFIG;
-el<HTMLElement>("cli-snippet").textContent = "claude mcp add tracepaper -- npx -y tracepaper";
+el<HTMLElement>("cli-snippet").textContent = "claude mcp add tracepaper -- npx -y github:caffeinum/tracepaper";
 el<HTMLButtonElement>("copy-config").addEventListener("click", (event) => {
   const button = event.currentTarget;
   navigator.clipboard

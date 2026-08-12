@@ -3,7 +3,7 @@
  * Launcher, deliberately plain Node with no dependencies and no Bun APIs.
  *
  * The server itself needs Bun (bun:sqlite, Bun.serve). This file exists so that
- * `npx -y tracepaper` — the one-liner an MCP client config points at — behaves properly on a
+ * `npx -y github:caffeinum/tracepaper` — the one-liner an MCP client config points at — behaves properly on a
  * machine without Bun: npm runs this under Node, and it either hands off to Bun or explains
  * exactly what is missing. Without it the shebang would resolve to a missing interpreter and
  * the user would get `env: bun: No such file or directory` from inside their MCP client, with

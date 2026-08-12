@@ -14,28 +14,42 @@ open browser within seconds, and a human's comment is readable by the agent on t
 
 ## Install
 
-Requires [Bun](https://bun.sh) 1.3+ — the server uses `bun:sqlite` and `Bun.serve`.
-
-Once published, the whole install is the client config below: `npx -y tracepaper` fetches and
-runs it, no clone and no build step. The `bin` is a plain Node launcher that hands off to Bun,
-so on a machine without Bun it prints an install line instead of a missing-interpreter error.
-
-From source (what you need today — the repo is private, so `bun add github:caffeinum/tracepaper`
-will 404 without repo access):
+One line, nothing to clone and nothing to build:
 
 ```sh
-git clone git@github.com:caffeinum/tracepaper.git
+claude mcp add tracepaper -- npx -y github:caffeinum/tracepaper
+```
+
+or in any MCP client's JSON:
+
+```json
+{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "github:caffeinum/tracepaper"] } } }
+```
+
+That is the whole install. `npx` resolves the GitHub repo directly — no npm package needed —
+and the canvas bundle compiles itself on first boot.
+
+Requires [Bun](https://bun.sh) 1.3+, since the server uses `bun:sqlite` and `Bun.serve`. The
+`bin` is a plain Node launcher that hands off to Bun, so on a machine without it you get an
+install line rather than a missing-interpreter error:
+
+```sh
+curl -fsSL https://bun.sh/install | bash
+```
+
+### From a clone
+
+For hacking on it:
+
+```sh
+git clone https://github.com/caffeinum/tracepaper.git
 cd tracepaper
 bun install
 ```
 
-That is the whole install. There is no build step to remember: the canvas bundle is
-compiled on first boot if it is missing, so wiring the server into an MCP client works
-straight from a fresh clone. (`bun run build:web` still exists if you want it up front,
-and you need it after editing `web/canvas.ts`.)
-
-Then point your client at `src/index.ts` — see [MCP client config](#mcp-client-config)
-below — or run it yourself:
+No build step to remember — the canvas bundle compiles on first boot if it is missing.
+(`bun run build:web` exists for up-front builds, and you need it after editing
+`web/canvas.ts`.)
 
 ## Run
 
@@ -74,25 +88,15 @@ stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
 ## MCP client config
 
-Paths must be absolute — the client sets its own working directory.
-
-Claude Code:
-
-```sh
-claude mcp add tracepaper -- bun run "$PWD/src/index.ts"     # run from the repo root
-claude mcp list                                          # tracepaper: ✓ connected
-```
-
-Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the same JSON
-(`.mcp.json`, `~/.cursor/mcp.json`, `claude_desktop_config.json`):
-
-Once it is on npm this becomes the one-liner — no path, no clone:
+The one-liner above works in every MCP client — Claude Code, Cursor, Windsurf, Zed, Claude
+Desktop — via `.mcp.json`, `~/.cursor/mcp.json` or `claude_desktop_config.json`:
 
 ```json
-{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "tracepaper"] } } }
+{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "github:caffeinum/tracepaper"] } } }
 ```
 
-From a clone, point at the entry file instead:
+Running from a clone instead? Point at the entry file, with an absolute path — the client
+sets its own working directory:
 
 ```json
 {
