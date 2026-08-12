@@ -1,0 +1,23 @@
+bin/paper-mcp.mjs
+  s_7adfa64874e58c::t_e4529d4bac2a32 1-57
+package.json
+  s_7adfa64874e58c::t_6f1ef25fc00ba1 6,9
+README.md
+  s_7adfa64874e58c::t_efff905fd78792 17-24,89-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "da1b2cf321197fa9d6b78966ba3ac30e44c222e9",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
