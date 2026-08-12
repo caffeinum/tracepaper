@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "paper-mcp": "src/index.ts"
+    "paper-mcp": "bin/paper-mcp.mjs"
   },
   "files": [
+    "bin",
     "src",
     "web",
     "SPEC.md"

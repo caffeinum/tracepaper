@@ -14,8 +14,14 @@ open browser within seconds, and a human's comment is readable by the agent on t
 
 ## Install
 
-Requires [Bun](https://bun.sh) 1.3+. The repo is private, so install it by cloning —
-`bun add github:caffeinum/paper-mcp` will 404 without repo access.
+Requires [Bun](https://bun.sh) 1.3+ — the server uses `bun:sqlite` and `Bun.serve`.
+
+Once published, the whole install is the client config below: `npx -y paper-mcp` fetches and
+runs it, no clone and no build step. The `bin` is a plain Node launcher that hands off to Bun,
+so on a machine without Bun it prints an install line instead of a missing-interpreter error.
+
+From source (what you need today — the repo is private, so `bun add github:caffeinum/paper-mcp`
+will 404 without repo access):
 
 ```sh
 git clone git@github.com:caffeinum/paper-mcp.git
@@ -79,6 +85,14 @@ claude mcp list                                          # paper: ✓ connected
 
 Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the same JSON
 (`.mcp.json`, `~/.cursor/mcp.json`, `claude_desktop_config.json`):
+
+Once it is on npm this becomes the one-liner — no path, no clone:
+
+```json
+{ "mcpServers": { "paper": { "command": "npx", "args": ["-y", "paper-mcp"] } } }
+```
+
+From a clone, point at the entry file instead:
 
 ```json
 {
