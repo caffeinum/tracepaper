@@ -181,7 +181,9 @@ update. Each comment records the `frameVersion` it was left on.
 - `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
   at that frame-local coordinate and opens a composer. `esc` cancels.
 - Click a pin to open its thread — reply, resolve, or delete there.
-- Double-click a frame to interact with the page inside it; `esc` leaves.
+- Double-click a frame to interact with the page inside it. Leave with `esc`, by clicking
+  the canvas, or with the pill under the frame — once you click *into* the frame, focus is in a
+  sandboxed iframe of another origin and `esc` can no longer reach the canvas.
 - Chrome floats over a full-bleed canvas; nothing holds a permanent column. `t` (or the
   toolbar's **List**) opens the comment list on the right, grouped by frame with unresolved
   first — clicking an entry pans to its pin. It stays closed until you ask for it; the badge

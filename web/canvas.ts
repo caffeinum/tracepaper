@@ -440,9 +440,14 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   const pins = document.createElement("div");
   pins.className = "pins";
 
-  const hint = document.createElement("div");
+  // Clickable, not just a label: once you click inside the frame the focus is in a sandboxed
+  // iframe of another origin, so `esc` never reaches this page. Without a button here the only
+  // way out is clicking the canvas, which is not discoverable.
+  const hint = document.createElement("button");
+  hint.type = "button";
   hint.className = "frame-hint";
-  hint.textContent = "interactive — esc to leave";
+  hint.textContent = "interactive — click here or press esc to leave";
+  hint.addEventListener("click", () => setInteractive(null));
 
   body.append(iframe, catcher, pins);
   root.append(label, body, hint);
@@ -926,6 +931,15 @@ let panStart = { x: 0, y: 0, viewX: 0, viewY: 0 };
 
 const IGNORE_PAN = ".panel, .toolbar, .sidebar, .empty-card, .pin, .frame-kill";
 
+/**
+ * A press is only a pan once it has actually moved. Capturing the pointer on pointerdown
+ * retargets every later pointer and mouse event to the stage, so `click` and `dblclick` never
+ * reach the element under the cursor — which silently broke double-click-to-interact on a
+ * frame. Waiting for real movement keeps the gesture and lets a stationary press stay a click.
+ */
+const PAN_THRESHOLD_PX = 4;
+let pendingPan = false;
+
 stage.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (target instanceof Element && target.closest(IGNORE_PAN)) return;
@@ -937,23 +951,33 @@ stage.addEventListener("pointerdown", (event) => {
   if (left && mode === "comment" && onFrame) return;
   if (left && !spaceHeld && onFrame && frameEl.dataset["frameId"] === interactiveFrameId) return;
 
-  panning = true;
+  pendingPan = true;
   panPointer = event.pointerId;
   panStart = { x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y };
-  stage.setPointerCapture(event.pointerId);
-  updateCursor();
-  event.preventDefault();
+  // A middle-drag has no click semantics to protect, and its default is autoscroll.
+  if (middle) event.preventDefault();
 });
 
 stage.addEventListener("pointermove", (event) => {
-  if (!panning || event.pointerId !== panPointer) return;
+  if (event.pointerId !== panPointer) return;
+
+  if (pendingPan && !panning) {
+    const moved = Math.hypot(event.clientX - panStart.x, event.clientY - panStart.y);
+    if (moved < PAN_THRESHOLD_PX) return;
+    panning = true;
+    stage.setPointerCapture(event.pointerId);
+    updateCursor();
+  }
+  if (!panning) return;
+
   view.x = panStart.viewX + (event.clientX - panStart.x);
   view.y = panStart.viewY + (event.clientY - panStart.y);
   applyView();
 });
 
 function endPan(event: PointerEvent): void {
-  if (!panning || event.pointerId !== panPointer) return;
+  if (event.pointerId !== panPointer) return;
+  pendingPan = false;
   panning = false;
   panPointer = -1;
   if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
