@@ -1,0 +1,24 @@
+bin/tracepaper.mjs
+  s_7adfa64874e58c::t_e35cd5d4e3b3dd 6
+README.md
+  s_7adfa64874e58c::t_fa51ec794601a1 17,19-30,32-34,37-45,50-52,91-92,95,98-99
+web/canvas.ts
+  s_7adfa64874e58c::t_e35cd5d4e3b3dd 1066-1067
+  s_7adfa64874e58c::t_1f89ff7b054dcf 1073
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1ce3c0a8faf87ba5db9612be3fe4658c457a6efa",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
