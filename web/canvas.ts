@@ -1,5 +1,5 @@
 /**
- * paper-mcp canvas.
+ * tracepaper canvas.
  *
  * World model: every frame lives at an absolute (x, y) in *world* px. One CSS
  * transform on #world — `translate(view.x, view.y) scale(view.scale)` with
@@ -146,7 +146,7 @@ async function api(path: string, init?: RequestInit): Promise<unknown> {
  * which is what stops a sandboxed frame (or any page the human is visiting) from posting
  * comments as the human. See guardMutation in src/http.ts.
  */
-const WRITE_HEADERS = { "content-type": "application/json", "x-paper-mcp": "1" };
+const WRITE_HEADERS = { "content-type": "application/json", "x-tracepaper": "1" };
 
 function postJson(path: string, body: unknown): Promise<unknown> {
   return api(path, { method: "POST", headers: WRITE_HEADERS, body: JSON.stringify(body) });
@@ -1062,15 +1062,15 @@ el<HTMLButtonElement>("tool-fit").addEventListener("click", () => zoomToFit());
 
 const MCP_CONFIG = `{
   "mcpServers": {
-    "paper-mcp": {
+    "tracepaper": {
       "command": "bunx",
-      "args": ["paper-mcp"]
+      "args": ["tracepaper"]
     }
   }
 }`;
 
 el<HTMLPreElement>("config-snippet").textContent = MCP_CONFIG;
-el<HTMLElement>("cli-snippet").textContent = "claude mcp add paper-mcp -- bunx paper-mcp";
+el<HTMLElement>("cli-snippet").textContent = "claude mcp add tracepaper -- npx -y tracepaper";
 el<HTMLButtonElement>("copy-config").addEventListener("click", (event) => {
   const button = event.currentTarget;
   navigator.clipboard

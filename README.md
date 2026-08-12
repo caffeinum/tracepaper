@@ -1,4 +1,4 @@
-# paper-mcp
+# tracepaper
 
 An MCP server that gives an agent a canvas.
 
@@ -16,16 +16,16 @@ open browser within seconds, and a human's comment is readable by the agent on t
 
 Requires [Bun](https://bun.sh) 1.3+ — the server uses `bun:sqlite` and `Bun.serve`.
 
-Once published, the whole install is the client config below: `npx -y paper-mcp` fetches and
+Once published, the whole install is the client config below: `npx -y tracepaper` fetches and
 runs it, no clone and no build step. The `bin` is a plain Node launcher that hands off to Bun,
 so on a machine without Bun it prints an install line instead of a missing-interpreter error.
 
-From source (what you need today — the repo is private, so `bun add github:caffeinum/paper-mcp`
+From source (what you need today — the repo is private, so `bun add github:caffeinum/tracepaper`
 will 404 without repo access):
 
 ```sh
-git clone git@github.com:caffeinum/paper-mcp.git
-cd paper-mcp
+git clone git@github.com:caffeinum/tracepaper.git
+cd tracepaper
 bun install
 ```
 
@@ -46,7 +46,7 @@ bun run src/index.ts          # MCP over stdio AND the canvas over HTTP, one pro
 ```
 
 That is what your MCP client launches, and it is the whole setup — the canvas comes up with
-it, at <http://127.0.0.1:4321> (the resolved URL is also written to `~/.paper-mcp/server.json`,
+it, at <http://127.0.0.1:4321> (the resolved URL is also written to `~/.tracepaper/server.json`,
 and every tool returns it as `canvasUrl`).
 
 ```sh
@@ -60,16 +60,16 @@ port, so agent pushes land in the tab you already have open.
 
 | env | default | meaning |
 | --- | --- | --- |
-| `PAPER_MCP_PORT` | `4321` | HTTP port. If busy, the next free port is used and reported. |
-| `PAPER_MCP_HOST` | `127.0.0.1` | bind address |
-| `PAPER_MCP_DB` | `~/.paper-mcp/paper.db` | SQLite file. `:memory:` for throwaway runs. |
+| `TRACEPAPER_PORT` | `4321` | HTTP port. If busy, the next free port is used and reported. |
+| `TRACEPAPER_HOST` | `127.0.0.1` | bind address |
+| `TRACEPAPER_DB` | `~/.tracepaper/tracepaper.db` | SQLite file. `:memory:` for throwaway runs. |
 
 stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
-> **One canvas per machine, by default.** `~/.paper-mcp/paper.db` and port 4321 are global, so
+> **One canvas per machine, by default.** `~/.tracepaper/tracepaper.db` and port 4321 are global, so
 > two projects both wired with the config below share one canvas — project B's agent will call
 > `list_frames` and get project A's frames, and `push_html` with no `frameId` will land its work
-> next to them. To give a project its own, set `PAPER_MCP_DB` and `PAPER_MCP_PORT` in that
+> next to them. To give a project its own, set `TRACEPAPER_DB` and `TRACEPAPER_PORT` in that
 > project's MCP config.
 
 ## MCP client config
@@ -89,7 +89,7 @@ Cursor, Windsurf, Zed, Claude Desktop and anything else MCP-speaking take the sa
 Once it is on npm this becomes the one-liner — no path, no clone:
 
 ```json
-{ "mcpServers": { "paper": { "command": "npx", "args": ["-y", "paper-mcp"] } } }
+{ "mcpServers": { "paper": { "command": "npx", "args": ["-y", "tracepaper"] } } }
 ```
 
 From a clone, point at the entry file instead:
@@ -99,9 +99,9 @@ From a clone, point at the entry file instead:
   "mcpServers": {
     "paper": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/paper-mcp/src/index.ts"],
+      "args": ["run", "/absolute/path/to/tracepaper/src/index.ts"],
       "env": {
-        "PAPER_MCP_PORT": "4321"
+        "TRACEPAPER_PORT": "4321"
       }
     }
   }
@@ -222,7 +222,7 @@ bash test/mcpt-loop.sh # the same loop driven by the external `mcpt` CLI
 Expect `bun test` to report **90 pass / 0 fail across 3 files** in ~15s, and the script to
 end with `OK — the loop works through mcpt`. Both exit non-zero on any failure, and both
 are safe to run repeatedly: every test gets its own temp database, its own `HOME` (so your
-real `~/.paper-mcp/server.json` is never touched), and an ephemeral port. Nothing needs
+real `~/.tracepaper/server.json` is never touched), and an ephemeral port. Nothing needs
 cleaning up between runs.
 
 ### `bun test`

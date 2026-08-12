@@ -22,7 +22,7 @@ and the HTTP GET endpoint.
 Constraint worth designing around: the filter is a closed set
 (`toolsListChanged`, `promptsListChanged`, `resourcesListChanged`, `resourceSubscriptions`).
 You cannot push an arbitrary payload — you push *"resource X changed"* and the client
-refetches. So paper-mcp exposes comments as a resource per frame, and a human comment
+refetches. So tracepaper exposes comments as a resource per frame, and a human comment
 becomes an `updated` notification the agent's client resolves by reading it.
 
 On stdio, subscriptions do not survive a reconnect: the client **MUST** re-send

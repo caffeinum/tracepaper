@@ -7,7 +7,7 @@ import { startHttpServer, type HttpServer } from "../src/http.ts";
 import { Store } from "../src/store.ts";
 import type { Comment, Frame, FrameSummary } from "../src/types.ts";
 
-const webDir = mkdtempSync(join(tmpdir(), "paper-mcp-web-"));
+const webDir = mkdtempSync(join(tmpdir(), "tracepaper-web-"));
 mkdirSync(join(webDir, "dist"));
 writeFileSync(join(webDir, "index.html"), "<!doctype html><title>canvas</title><h1>canvas</h1>");
 writeFileSync(join(webDir, "style.css"), ":root{--bg:#111}");
@@ -40,7 +40,7 @@ async function waitFor(predicate: () => boolean, what: string): Promise<void> {
 }
 
 /** Writes carry the same header the canvas sends; see guardMutation in src/http.ts. */
-const WRITE_HEADERS = { "content-type": "application/json", "x-paper-mcp": "1" };
+const WRITE_HEADERS = { "content-type": "application/json", "x-tracepaper": "1" };
 
 async function post(path: string, body: unknown): Promise<Response> {
   return fetch(`${base}${path}`, {
@@ -463,7 +463,7 @@ describe("GET /api/events", () => {
 
 describe("static files", () => {
   test("booting against an unbuilt web dir throws instead of serving a dead canvas", () => {
-    const bare = mkdtempSync(join(tmpdir(), "paper-mcp-unbuilt-"));
+    const bare = mkdtempSync(join(tmpdir(), "tracepaper-unbuilt-"));
     writeFileSync(join(bare, "index.html"), "<!doctype html>");
     expect(() =>
       startHttpServer({ store, bus, port: 0, host: "127.0.0.1", webDir: bare }),

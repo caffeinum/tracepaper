@@ -1,9 +1,9 @@
 {
-  "name": "paper-mcp",
+  "name": "tracepaper",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "paper-mcp": "bin/paper-mcp.mjs"
+    "tracepaper": "bin/tracepaper.mjs"
   },
   "files": [
     "bin",
@@ -25,5 +25,6 @@
   "devDependencies": {
     "@types/bun": "1.3.14",
     "typescript": "7.0.2"
-  }
+  },
+  "description": "An MCP server that gives an agent a canvas: it pushes HTML frames, you pin comments on them, it reads them back."
 }

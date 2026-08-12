@@ -98,10 +98,10 @@ async function withServer(
   body: (session: Session) => Promise<void>,
   options: { dbPath?: string } = {},
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "paper-mcp-e2e-"));
+  const dir = mkdtempSync(join(tmpdir(), "tracepaper-e2e-"));
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
-  const dbPath = options.dbPath === undefined ? join(dir, "paper.db") : options.dbPath;
+  const dbPath = options.dbPath === undefined ? join(dir, "tracepaper.db") : options.dbPath;
 
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -109,14 +109,14 @@ async function withServer(
     cwd: ROOT,
     env: {
       ...getDefaultEnvironment(),
-      HOME: home, // keeps the real ~/.paper-mcp/server.json untouched
-      PAPER_MCP_PORT: "0",
-      PAPER_MCP_DB: dbPath,
-      PAPER_MCP_HOST: "127.0.0.1",
+      HOME: home, // keeps the real ~/.tracepaper/server.json untouched
+      TRACEPAPER_PORT: "0",
+      TRACEPAPER_DB: dbPath,
+      TRACEPAPER_HOST: "127.0.0.1",
     },
     stderr: "ignore",
   });
-  const client = new Client({ name: "paper-mcp-e2e", version: "0.1.0" });
+  const client = new Client({ name: "tracepaper-e2e", version: "0.1.0" });
 
   let pid = -1;
   try {
@@ -155,7 +155,7 @@ async function withServer(
       async humanComment(frameId, x, y, text) {
         const res = await fetch(`${base}/api/comments`, {
           method: "POST",
-          headers: { "content-type": "application/json", "x-paper-mcp": "1" },
+          headers: { "content-type": "application/json", "x-tracepaper": "1" },
           body: JSON.stringify({ frameId, x, y, text }),
         });
         expect(res.status).toBe(201);
@@ -512,12 +512,12 @@ test("the child process and its port die with the client", async () => {
 
 /**
  * SPEC's own topology: `serve` holds the human's canvas open while a separate agent
- * process speaks stdio, both on ~/.paper-mcp/paper.db. Without a busy_timeout SQLite
+ * process speaks stdio, both on ~/.tracepaper/tracepaper.db. Without a busy_timeout SQLite
  * fails the second writer outright with "database is locked".
  */
 test("two server processes share one db file without losing writes", async () => {
-  const shared = mkdtempSync(join(tmpdir(), "paper-mcp-shared-"));
-  const dbPath = join(shared, "paper.db");
+  const shared = mkdtempSync(join(tmpdir(), "tracepaper-shared-"));
+  const dbPath = join(shared, "tracepaper.db");
   const each = 12;
 
   try {
@@ -558,7 +558,7 @@ test("two server processes share one db file without losing writes", async () =>
  * so assert the exit happens on EOF alone — no signal is ever sent here.
  */
 test("the server exits on stdin EOF alone, with no signal", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "paper-mcp-eof-"));
+  const dir = mkdtempSync(join(tmpdir(), "tracepaper-eof-"));
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
 
@@ -567,9 +567,9 @@ test("the server exits on stdin EOF alone, with no signal", async () => {
     env: {
       ...process.env,
       HOME: home,
-      PAPER_MCP_PORT: "0",
-      PAPER_MCP_DB: join(dir, "paper.db"),
-      PAPER_MCP_HOST: "127.0.0.1",
+      TRACEPAPER_PORT: "0",
+      TRACEPAPER_DB: join(dir, "tracepaper.db"),
+      TRACEPAPER_HOST: "127.0.0.1",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -577,8 +577,8 @@ test("the server exits on stdin EOF alone, with no signal", async () => {
   });
 
   try {
-    // ~/.paper-mcp/server.json is the documented discovery file; its arrival means fully booted.
-    const serverJson = join(home, ".paper-mcp", "server.json");
+    // ~/.tracepaper/server.json is the documented discovery file; its arrival means fully booted.
+    const serverJson = join(home, ".tracepaper", "server.json");
     const bootDeadline = Date.now() + EXIT_TIMEOUT_MS;
     while (!existsSync(serverJson)) {
       if (Date.now() > bootDeadline) throw new Error(`server never wrote ${serverJson}`);

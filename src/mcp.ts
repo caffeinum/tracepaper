@@ -22,7 +22,7 @@ import {
   type PushHtmlResult,
 } from "./types.ts";
 
-export const SERVER_NAME = "paper-mcp";
+export const SERVER_NAME = "tracepaper";
 export const SERVER_VERSION = "0.1.0";
 
 export type McpServerDeps = {
@@ -135,7 +135,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       instructions: [
-        "paper-mcp is a shared canvas between you and a human.",
+        "tracepaper is a shared canvas between you and a human.",
         "push_html draws a frame; the human opens canvasUrl in a browser, pins comments onto the",
         "frames, and you read those comments back with get_comments (poll it with the returned",
         "cursor). reply_to_comment and resolve_comment close the loop.",

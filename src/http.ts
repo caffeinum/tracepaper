@@ -140,7 +140,7 @@ const MUTATING = new Set(["POST", "PATCH", "DELETE"]);
  * A custom request header cannot be set by a simple request, so requiring one on every mutation
  * proves the caller is our own fetch and not a cross-document write.
  */
-const CANVAS_HEADER = "x-paper-mcp";
+const CANVAS_HEADER = "x-tracepaper";
 
 function guardMutation(request: Request, method: string): Response | null {
   if (!MUTATING.has(method)) return null;

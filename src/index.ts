@@ -68,7 +68,7 @@ async function ensureCanvasBundle(): Promise<void> {
   const outdir = fileURLToPath(new URL("../web/dist/", import.meta.url));
   if (existsSync(join(outdir, "canvas.js"))) return;
 
-  console.error("[paper-mcp] building the canvas bundle (first run)…");
+  console.error("[tracepaper] building the canvas bundle (first run)…");
   const built = await Bun.build({ entrypoints: [entry], outdir, target: "browser", minify: true });
   if (!built.success) {
     throw new Error(`canvas bundle failed to build:\n${built.logs.map(String).join("\n")}`);
@@ -91,15 +91,15 @@ async function main(): Promise<void> {
   if (canvasUrl === undefined) throw new Error("no canvas url: neither a live nor a new server");
   console.error(
     live === null
-      ? `[paper-mcp] canvas at ${canvasUrl}  db=${config.dbPath}  mode=${mode}`
-      : `[paper-mcp] joining the canvas already serving this db at ${canvasUrl}`,
+      ? `[tracepaper] canvas at ${canvasUrl}  db=${config.dbPath}  mode=${mode}`
+      : `[tracepaper] joining the canvas already serving this db at ${canvasUrl}`,
   );
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.error(`[paper-mcp] ${signal} — shutting down`);
+    console.error(`[tracepaper] ${signal} — shutting down`);
     http?.stop();
     store.close();
     process.exit(0);
@@ -119,10 +119,10 @@ async function main(): Promise<void> {
   server.server.onclose = () => shutdown("stdio transport closed");
   process.stdin.on("end", () => shutdown("stdin closed"));
   process.stdin.on("close", () => shutdown("stdin closed"));
-  console.error("[paper-mcp] mcp stdio transport connected");
+  console.error("[tracepaper] mcp stdio transport connected");
 }
 
 main().catch((error: unknown) => {
-  console.error("[paper-mcp] fatal:", error);
+  console.error("[tracepaper] fatal:", error);
   process.exit(1);
 });

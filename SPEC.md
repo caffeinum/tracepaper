@@ -1,4 +1,4 @@
-# paper-mcp — spec
+# tracepaper — spec
 
 An MCP server that gives an AI agent a **canvas**. The agent pushes HTML frames onto
 it; a human scrolls the canvas in a browser and leaves comments on the frames; the
@@ -30,11 +30,11 @@ stdout — all logging goes to stderr.
 
 | env | default | meaning |
 | --- | --- | --- |
-| `PAPER_MCP_PORT` | `4321` | HTTP port. If busy, pick the next free port and report the real one. |
-| `PAPER_MCP_DB` | `~/.paper-mcp/paper.db` | SQLite file. `:memory:` supported for tests. |
-| `PAPER_MCP_HOST` | `127.0.0.1` | bind address |
+| `TRACEPAPER_PORT` | `4321` | HTTP port. If busy, pick the next free port and report the real one. |
+| `TRACEPAPER_DB` | `~/.tracepaper/tracepaper.db` | SQLite file. `:memory:` supported for tests. |
+| `TRACEPAPER_HOST` | `127.0.0.1` | bind address |
 
-The resolved base URL is written to `~/.paper-mcp/server.json` so tooling can find it.
+The resolved base URL is written to `~/.tracepaper/server.json` so tooling can find it.
 
 ## Data model
 

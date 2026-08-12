@@ -3,7 +3,7 @@
  * Launcher, deliberately plain Node with no dependencies and no Bun APIs.
  *
  * The server itself needs Bun (bun:sqlite, Bun.serve). This file exists so that
- * `npx -y paper-mcp` — the one-liner an MCP client config points at — behaves properly on a
+ * `npx -y tracepaper` — the one-liner an MCP client config points at — behaves properly on a
  * machine without Bun: npm runs this under Node, and it either hands off to Bun or explains
  * exactly what is missing. Without it the shebang would resolve to a missing interpreter and
  * the user would get `env: bun: No such file or directory` from inside their MCP client, with
@@ -23,7 +23,7 @@ function bunVersion() {
 if (bunVersion() === null) {
   process.stderr.write(
     [
-      "paper-mcp needs Bun, which is not on PATH.",
+      "tracepaper needs Bun, which is not on PATH.",
       "",
       "  curl -fsSL https://bun.sh/install | bash    # or: brew install oven-sh/bun/bun",
       "",
@@ -39,7 +39,7 @@ if (bunVersion() === null) {
 const child = spawn("bun", ["run", entry, ...process.argv.slice(2)], { stdio: "inherit" });
 
 child.on("error", (error) => {
-  process.stderr.write(`paper-mcp: failed to start bun: ${error.message}\n`);
+  process.stderr.write(`tracepaper: failed to start bun: ${error.message}\n`);
   process.exit(1);
 });
 

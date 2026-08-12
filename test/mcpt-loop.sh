@@ -15,10 +15,10 @@ if ! command -v mcpt >/dev/null 2>&1; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/paper-mcp-mcpt.XXXXXX")"
-export HOME="$WORK/home"          # keeps the real ~/.paper-mcp/server.json untouched
-export PAPER_MCP_DB="$WORK/paper.db"
-export PAPER_MCP_HOST=127.0.0.1
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/tracepaper-mcpt.XXXXXX")"
+export HOME="$WORK/home"          # keeps the real ~/.tracepaper/server.json untouched
+export TRACEPAPER_DB="$WORK/tracepaper.db"
+export TRACEPAPER_HOST=127.0.0.1
 mkdir -p "$HOME"
 
 SERVE_PID=""
@@ -50,7 +50,7 @@ json() { KEY="$1" bun -e '
 # Calls a tool through mcpt and prints its text content, asserting isError matches MODE.
 run_tool() {
   local tool="$1" params="$2" raw
-  raw="$(PAPER_MCP_PORT=0 mcpt call "$tool" --params "$params" --format json \
+  raw="$(TRACEPAPER_PORT=0 mcpt call "$tool" --params "$params" --format json \
       bun run "$ROOT/src/index.ts" 2>"$WORK/mcpt.err")" \
     || { echo "FAIL: mcpt call $tool crashed: $(cat "$WORK/mcpt.err")" >&2; return 1; }
   printf '%s' "$raw" | TOOL="$tool" bun -e '
@@ -79,7 +79,7 @@ health() { curl -fsS "$BASE/api/health" | json "$1"; }
 # ---------- the human's browser side: one long-lived server on a pinned port ----------
 
 PORT="$(bun -e 'const s=Bun.serve({port:0,fetch:()=>new Response("")});console.log(s.port);s.stop(true)')"
-PAPER_MCP_PORT="$PORT" bun run "$ROOT/src/index.ts" serve >/dev/null 2>"$WORK/serve.log" &
+TRACEPAPER_PORT="$PORT" bun run "$ROOT/src/index.ts" serve >/dev/null 2>"$WORK/serve.log" &
 SERVE_PID=$!
 BASE="http://127.0.0.1:$PORT"
 
@@ -88,12 +88,12 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 curl -fsS "$BASE/api/health" >/dev/null || fail "http server never came up (see $WORK/serve.log)"
-[ -f "$PAPER_MCP_DB" ] || fail "the shared db file was never created at $PAPER_MCP_DB"
+[ -f "$TRACEPAPER_DB" ] || fail "the shared db file was never created at $TRACEPAPER_DB"
 
 # ---------- the loop ----------
 
 step "tools — all seven are advertised to an outside client"
-TOOLS="$(PAPER_MCP_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
+TOOLS="$(TRACEPAPER_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
 for tool in push_html get_comments get_frame list_frames resolve_comment reply_to_comment delete_frame; do
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
@@ -130,9 +130,9 @@ want "unknown frame: frm_000000000000" "$GHOST" "wrong error message"
 equal "$(health frames)" "1" "a bogus frameId created a frame anyway"
 
 step "human comment — posted over HTTP exactly as the browser does"
-# The x-paper-mcp header is what the canvas sends; without it the server refuses the write,
+# The x-tracepaper header is what the canvas sends; without it the server refuses the write,
 # which is what stops a page the human is visiting — or agent-written HTML — posting as them.
-POSTED="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
+POSTED="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-tracepaper: 1' \
   -d "{\"frameId\":\"$FRAME\",\"x\":412,\"y\":233,\"text\":\"tighten the header\"}")"
 
 step "a write without that header is refused, so hostile frame html cannot speak as the human"
@@ -158,7 +158,7 @@ CURSOR="$(printf '%s' "$SEEN" | grep -o 'cur_[0-9]\{1,\}' | head -1)"
 [ -n "$CURSOR" ] || fail "get_comments did not hand back a cur_ cursor: $SEEN"
 CAUGHT_UP="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
 want "Nothing new since that cursor" "$CAUGHT_UP" "the cursor returned stale comments"
-curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
+curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-tracepaper: 1' \
   -d "{\"frameId\":\"$FRAME\",\"x\":10,\"y\":20,\"text\":\"and fix the footer\"}" >/dev/null
 FRESH="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
 want "and fix the footer" "$FRESH" "the cursor did not surface the new comment"
@@ -167,7 +167,7 @@ avoid "tighten the header" "$FRESH" "the cursor re-returned an already-seen comm
 step "the cursor survives the agent resolving what it already read"
 # The regression that shipped once: resolving the comment a cursor names dragged the boundary
 # past everything written since, and those comments never came back on any later poll.
-LATER="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-paper-mcp: 1' \
+LATER="$(curl -fsS -X POST "$BASE/api/comments" -H 'content-type: application/json' -H 'x-tracepaper: 1' \
   -d "{\"frameId\":\"$FRAME\",\"x\":5,\"y\":5,\"text\":\"typed while you worked\"}" | json id)"
 mcp resolve_comment "{\"commentId\":\"$COMMENT\"}" >/dev/null
 STILL="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"since\":\"$CURSOR\"}")"
