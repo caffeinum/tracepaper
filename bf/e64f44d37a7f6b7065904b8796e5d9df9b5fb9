@@ -1,0 +1,64 @@
+test/mcpt-loop.sh
+  s_7adfa64874e58c::t_931d6dfd60de8c 172
+  s_7adfa64874e58c::t_c57b89663b30e4 129-131,133-138
+  s_7adfa64874e58c::t_41b3a34db8f520 150-157,159,163-171
+src/mcp.ts
+  s_7adfa64874e58c::t_61f9f93673dda4 236-239
+  s_7adfa64874e58c::t_4595820f12ab9f 166
+  s_7adfa64874e58c::t_5a76dca2b0f01d 165
+  s_7adfa64874e58c::t_150255ba0eee51 167-170,172-173,176-179
+test/http.test.ts
+  s_7adfa64874e58c::t_ba5f746174347d 211,225-228
+  s_7adfa64874e58c::t_2c254a3a4cea07 260,267,273-297,301
+  s_7adfa64874e58c::t_b1f36b07a55258 164,169,307,309
+  s_7adfa64874e58c::t_dbd7ed3d59b939 298-300
+  s_7adfa64874e58c::t_f854eb7ed003e9 42-44,48,56
+test/mcp-e2e.test.ts
+  s_7adfa64874e58c::t_50a52320a7ac9a 157
+  s_7adfa64874e58c::t_ba5f746174347d 291,318,323-324,332-333
+web/canvas.ts
+  s_7adfa64874e58c::t_bb864619328dff 144-150,152,156
+  s_7adfa64874e58c::t_1c0d8fe19bb0b5 407,722
+  s_7adfa64874e58c::t_4b01917bd9ba32 607-608
+test/store.test.ts
+  s_7adfa64874e58c::t_c6ae71ba9d7c32 504-610
+  s_7adfa64874e58c::t_0c194eb5f97aa2 193-195,197-201
+src/store.ts
+  s_7adfa64874e58c::t_9a53e867532e38 28-29
+  s_7adfa64874e58c::t_ab15a9c6b107a9 488-498
+  s_7adfa64874e58c::t_ed5a722dfaa806 406-407,412-415,418-422,424-438,440,442-450
+  s_7adfa64874e58c::t_20536c74208b98 482-487,499-510,512-516
+  s_7adfa64874e58c::t_a7c3c9a99d0614 243-268
+  s_7adfa64874e58c::t_5f2b1bef6ced54 308-311,313-316
+  s_7adfa64874e58c::t_5fa40ec227c8b8 195-196,198-206,209
+  s_7adfa64874e58c::t_5a3c70bb98c7bd 197,269,312,439
+  s_7adfa64874e58c::t_ad970ef0bbf0bc 1
+  s_7adfa64874e58c::t_5869c3d7cba44a 30-36
+src/types.ts
+  s_7adfa64874e58c::t_69193593a6b08d 167-172
+  s_7adfa64874e58c::t_2affec9232768b 7-13
+  s_7adfa64874e58c::t_8a4a8775d315a4 55-59,61,72,96
+  s_7adfa64874e58c::t_ee4eb56ead15b0 173-182
+src/http.ts
+  s_7adfa64874e58c::t_e8b8434c9abe42 170
+  s_7adfa64874e58c::t_adfce2d4f7391c 306-312
+  s_7adfa64874e58c::t_cc6521bfa14bfc 284
+  s_7adfa64874e58c::t_dd369f2cb0429a 268-274
+  s_7adfa64874e58c::t_bbf93033264691 130-153,159-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "bfe64f44d37a7f6b7065904b8796e5d9df9b5fb9",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
