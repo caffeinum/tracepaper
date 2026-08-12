@@ -1124,6 +1124,11 @@ function reconcile(): void {
     if (document.hidden) return;
     loadAll().catch(fail);
   }, RECONCILE_MS);
+  // A backgrounded tab skips the interval entirely, so without this it comes back showing
+  // whatever it had when you left — for as long as you were away.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadAll().catch(fail);
+  });
 }
 
 function subscribe(): void {

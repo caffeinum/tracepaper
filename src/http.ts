@@ -338,9 +338,9 @@ function handleEvents(ctx: Context): Response {
         }
       };
 
-      write(`retry: ${SSE_RETRY_MS}\n\n`);
-      write(": connected\n\n");
-
+      // Subscribe and wire teardown BEFORE the preamble writes. If enqueue throws on those
+      // first bytes, `write` calls teardown — and if that were still the no-op above, `open`
+      // would stay true and a subscriber plus a heartbeat would then attach to a dead stream.
       const unsubscribe = bus.subscribe((event: BusEvent) => {
         write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       });
@@ -359,6 +359,9 @@ function handleEvents(ctx: Context): Response {
         }
       };
       closeStream.add(teardown);
+
+      write(`retry: ${SSE_RETRY_MS}\n\n`);
+      write(": connected\n\n");
     },
     cancel() {
       teardown();
