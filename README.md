@@ -128,7 +128,7 @@ on your canvas: delete it from the pin menu, or
 
 | tool | what it does |
 | --- | --- |
-| `push_html` | `{html, name?, frameId?, width?, height?}` — draws a frame. No `frameId` creates one to the right of the last; with `frameId` it replaces that frame's HTML in place and bumps `version`, resizing it too if you pass `width`/`height`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
+| `push_html` | `{html, name?, frameId?, width?, height?, x?, y?}` — draws a frame. No `frameId` creates one, auto-placed beside the last and wrapping onto a new row so the canvas stays readable; pass `x`/`y` (world px) to place it yourself and group related work; with `frameId` it replaces that frame's HTML in place and bumps `version`, resizing it too if you pass `width`/`height`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
 | `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first, resolved excluded by default. Returns `{comments, cursor, frames}`; pass `cursor` back as `since` to poll for only what is new. Poll with `author: "human"` or your own replies come back looking like fresh feedback. `since` accepts an ISO timestamp too, but that matches only comments *created* after it — one the human edited or re-opened never comes back, and two written in the same millisecond cannot be separated. Prefer the cursor. |
 | `get_frame` | `{frameId}` → the frame's current HTML, name, size and version. Call it before `push_html` on a frame you did not author this session: `push_html` replaces the whole document, so pushing blind discards whatever is there. |
 | `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
@@ -181,6 +181,11 @@ update. Each comment records the `frameVersion` it was left on.
 - `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
   at that frame-local coordinate and opens a composer. `esc` cancels.
 - Click a pin to open its thread — reply, resolve, or delete there.
+- Frames land in rows, wrapping about three wide, rather than marching off to the right forever.
+  An agent can place them deliberately with `x`/`y`.
+- Sound inside a frame works once you interact with it. Autoplay on load is blocked by the
+  browser's policy for sandboxed frames, which is the behaviour you want — a canvas full of
+  frames cannot start making noise on its own.
 - Double-click a frame to interact with the page inside it. Leave with `esc`, by clicking
   the canvas, or with the pill under the frame — once you click *into* the frame, focus is in a
   sandboxed iframe of another origin and `esc` can no longer reach the canvas.

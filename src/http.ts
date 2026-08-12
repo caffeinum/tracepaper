@@ -239,7 +239,7 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
 
   const parsed = CreateOrUpdateFrameBodySchema.safeParse(body);
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
-  const { html, name, frameId, width, height } = parsed.data;
+  const { html, name, frameId, width, height, x, y } = parsed.data;
 
   if (frameId !== undefined) {
     const frame = ctx.store.updateFrameHtml(frameId, html, { name, width, height });
@@ -247,7 +247,7 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
     return json(frame);
   }
 
-  const frame = ctx.store.createFrame({ html, name, width, height });
+  const frame = ctx.store.createFrame({ html, name, width, height, x, y });
   ctx.bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
   return json(frame, 201);
 }

@@ -608,3 +608,45 @@ describe("size limits", () => {
     s.close();
   });
 });
+
+describe("frame layout", () => {
+  test("auto-placement wraps onto a new row instead of one endless strip", () => {
+    const s = store();
+    // 1280-wide frames: three fit in a row, the fourth must wrap.
+    const a = s.createFrame({ html: "<p>a</p>" });
+    const b = s.createFrame({ html: "<p>b</p>" });
+    const c = s.createFrame({ html: "<p>c</p>" });
+    const d = s.createFrame({ html: "<p>d</p>" });
+
+    expect([a.x, a.y]).toEqual([0, 0]);
+    expect(b.y).toBe(0);
+    expect(c.y).toBe(0);
+    expect(b.x).toBeGreaterThan(a.x);
+    expect(c.x).toBeGreaterThan(b.x);
+
+    expect(d.x).toBe(0);
+    expect(d.y).toBeGreaterThan(0);
+    expect(d.y).toBe(a.height + 120);
+    s.close();
+  });
+
+  test("an explicit x/y is honoured exactly, and later frames continue from that row", () => {
+    const s = store();
+    const placed = s.createFrame({ html: "<p>placed</p>", x: 640, y: 2000, width: 400 });
+    expect([placed.x, placed.y]).toEqual([640, 2000]);
+
+    const next = s.createFrame({ html: "<p>next</p>", width: 400 });
+    expect(next.y).toBe(2000);
+    expect(next.x).toBe(640 + 400 + 120);
+    s.close();
+  });
+
+  test("a frame wider than the row budget still lands rather than looping", () => {
+    const s = store();
+    s.createFrame({ html: "<p>a</p>" });
+    const huge = s.createFrame({ html: "<p>huge</p>", width: 9000 });
+    expect(huge.x).toBe(0);
+    expect(huge.y).toBeGreaterThan(0);
+    s.close();
+  });
+});

@@ -62,6 +62,8 @@ export const CreateFrameInputSchema = z.object({
   name: z.string().min(1).optional(),
   width: z.number().positive().default(DEFAULT_FRAME_WIDTH),
   height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
+  x: z.number().optional(),
+  y: z.number().optional(),
 });
 export type CreateFrameInput = z.input<typeof CreateFrameInputSchema>;
 
@@ -98,6 +100,8 @@ export const pushHtmlShape = {
   frameId: z.string().optional().describe("Existing frame to replace in place. Omit to create a new frame."),
   width: z.number().positive().optional().describe(`Frame width in css px (default ${DEFAULT_FRAME_WIDTH}). Resizes the frame when passed with frameId.`),
   height: z.number().positive().optional().describe(`Frame height in css px (default ${DEFAULT_FRAME_HEIGHT}). Resizes the frame when passed with frameId.`),
+  x: z.number().optional().describe("Canvas position in world px. Omit to auto-place. Use it to group related frames: a variant belongs beside its original, a new topic starts a new row."),
+  y: z.number().optional().describe("Canvas position in world px. Frames on the same y read as one row; step y down by the row's height plus ~120 to start a new row."),
 };
 export const PushHtmlInputSchema = z.object(pushHtmlShape);
 export type PushHtmlInput = z.infer<typeof PushHtmlInputSchema>;

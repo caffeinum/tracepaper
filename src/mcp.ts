@@ -38,9 +38,17 @@ const PUSH_HTML_DESCRIPTION = [
   "Push a full HTML document (or fragment) as a frame; it appears in the human's open browser within",
   "a few seconds, no reload needed. push_html REPLACES the frame's whole document — there is no",
   "partial update, so call get_frame first if you did not author the current HTML this session.",
-  "Omit frameId to add a new frame to the right of the last one. Pass frameId to replace that frame's",
-  "HTML in place — the version bumps and existing comments survive. An unknown frameId is an error,",
-  "never a silent create.",
+  "Omit frameId to add a new frame; it is auto-placed beside the last one and wraps onto a new row",
+  "so the canvas stays readable instead of growing into one endless strip. Pass frameId to replace",
+  "that frame's HTML in place — the version bumps and existing comments survive. An unknown frameId",
+  "is an error, never a silent create.",
+  "",
+  "LAYOUT: you can place frames yourself with x/y (world px) instead of accepting auto-placement,",
+  "and you should whenever the arrangement carries meaning. Put variants of one thing side by side",
+  "on a shared y so they read as a row and can be compared; start an unrelated topic on a new row",
+  "by stepping y down past the tallest frame above it (add ~120px of gutter). Reserve auto-placement",
+  "for one-off frames. list_frames returns every frame's x, y, width and height, so read it first",
+  "when you are placing something relative to existing work.",
   "",
   "The loop: after pushing, tell the human to open the returned canvasUrl. They scroll the canvas,",
   "click anywhere on a frame to drop a pin, and type feedback there. Read that feedback back with",
@@ -151,11 +159,11 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
       inputSchema: pushHtmlShape,
       outputSchema: PushHtmlResultSchema,
     },
-    ({ html, name, frameId, width, height }) => {
+    ({ html, name, frameId, width, height, x, y }) => {
       try {
         const frame =
           frameId === undefined
-            ? store.createFrame({ html, name, width, height })
+            ? store.createFrame({ html, name, width, height, x, y })
             : store.updateFrameHtml(frameId, html, { name, width, height });
         bus.emit({
           type: frameId === undefined ? "frame.created" : "frame.updated",
@@ -173,7 +181,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         const action = frameId === undefined ? "Created" : "Updated";
         return structuredResult(
           [
-            `${action} frame ${frame.id} "${frame.name}" (v${frame.version}, ${frame.width}x${frame.height}).`,
+            `${action} frame ${frame.id} "${frame.name}" (v${frame.version}, ${frame.width}x${frame.height}) at (${frame.x},${frame.y}).`,
             `Ask the human to open the canvas at ${result.canvasUrl} and leave comments on the frame.`,
             `Then poll get_comments (frameId: "${frame.id}") to read what they wrote.`,
             `Raw frame html: ${result.url}`,

@@ -25,6 +25,8 @@ export type UpdateFramePatch = {
 };
 
 const FRAME_GAP = 120;
+/** A row wraps past this world width — roughly three 1280px frames side by side. */
+const ROW_MAX_WIDTH = 4400;
 /** Marks an opaque feed position, so `since` can tell a cursor from a comment id. */
 export const CURSOR_PREFIX = "cur_";
 /**
@@ -192,10 +194,12 @@ export class Store {
   // ---------- frames ----------
 
   createFrame(input: CreateFrameInput): Frame {
-    const { html, name, width, height } = CreateFrameInputSchema.parse(input);
+    const { html, name, width, height, x, y } = CreateFrameInputSchema.parse(input);
     // The layout slot and the slot name are both read-then-written. Two processes on one db
     // otherwise pick the same x and the same "Frame N", stacking one frame invisibly on another.
-    return this.db.transaction(() => this.insertFrame({ html, name, width, height })).immediate();
+    return this.db
+      .transaction(() => this.insertFrame({ html, name, width, height, x, y }))
+      .immediate();
   }
 
   private insertFrame(input: {
@@ -203,17 +207,20 @@ export class Store {
     name: string | undefined;
     width: number;
     height: number;
+    x?: number | undefined;
+    y?: number | undefined;
   }): Frame {
     const { html, name, width, height } = input;
     const at = nowIso();
+    const auto = this.nextFramePosition(width);
     const frame: Frame = {
       id: newFrameId(),
       name: name === undefined ? this.nextFrameName() : name,
       html,
       width,
       height,
-      x: this.nextFrameX(),
-      y: 0,
+      x: input.x === undefined ? auto.x : input.x,
+      y: input.y === undefined ? auto.y : input.y,
       version: 1,
       createdAt: at,
       updatedAt: at,
@@ -536,11 +543,23 @@ export class Store {
     return { kind: "time", value: at.toISOString() };
   }
 
-  private nextFrameX(): number {
-    const row = this.db.query("SELECT MAX(x + width) AS right FROM frames").get() as {
-      right: number | null;
-    };
-    return row.right === null ? 0 : row.right + FRAME_GAP;
+  /**
+   * Auto-layout wraps into rows instead of marching right forever. An unbounded strip means
+   * every new frame is further from the last, so a canvas with a handful of frames can only be
+   * read by panning sideways and zoom-to-fit shrinks everything to nothing.
+   */
+  private nextFramePosition(width: number): { x: number; y: number } {
+    const last = this.db.query("SELECT MAX(y) AS y FROM frames").get() as { y: number | null };
+    if (last.y === null) return { x: 0, y: 0 };
+
+    const row = this.db
+      .query("SELECT MAX(x + width) AS right, MAX(height) AS tallest FROM frames WHERE y = $y")
+      .get({ $y: last.y }) as { right: number | null; tallest: number | null };
+    if (row.right === null || row.tallest === null) return { x: 0, y: last.y };
+
+    const nextX = row.right + FRAME_GAP;
+    if (nextX + width <= ROW_MAX_WIDTH) return { x: nextX, y: last.y };
+    return { x: 0, y: last.y + row.tallest + FRAME_GAP };
   }
 
   /** Frame.name is required by the data model; push_html's is optional, so unnamed frames get a slot label. */

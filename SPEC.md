@@ -93,7 +93,9 @@ The one tool the agent draws with.
 { html: string, name?: string, frameId?: string,
   width?: number = 1280, height?: number = 900 }
 ```
-- No `frameId` → creates a new frame, auto-positioned to the right of the last one.
+- No `frameId` → creates a new frame. Auto-placement fills a row and wraps to the next
+  once the row passes ~4400 world px, so a canvas does not become one endless strip.
+  `x`/`y` override it for deliberate grouping.
 - With `frameId` → replaces that frame's html in place, bumps `version`. Comments
   survive (they are anchored to the frame, not the DOM).
 - Unknown `frameId` → **error**, not a silent create.
