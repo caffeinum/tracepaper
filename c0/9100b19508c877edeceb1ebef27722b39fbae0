@@ -1,0 +1,36 @@
+src/store.ts
+  s_7adfa64874e58c::t_a1865ab9897d5f 600-612
+web/index.html
+  s_7adfa64874e58c::t_708af68a4d2244 31-32
+src/types.ts
+  s_7adfa64874e58c::t_a1865ab9897d5f 203-206
+src/http.ts
+  s_7adfa64874e58c::t_a1865ab9897d5f 13,196,289-297
+  s_7adfa64874e58c::t_4c58c61befb3df 298-299
+web/canvas.ts
+  s_7adfa64874e58c::t_708af68a4d2244 1129-1132
+  s_7adfa64874e58c::t_fde703866aa93c 432,523-577
+  s_7adfa64874e58c::t_e4723f0201dd39 578-579
+web/style.css
+  s_7adfa64874e58c::t_a49ad9dd33e3fb 441-456
+README.md
+  s_7adfa64874e58c::t_02631d3dcf512a 206-209
+SPEC.md
+  s_7adfa64874e58c::t_9520e12bccbcb9 154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "c09100b19508c877edeceb1ebef27722b39fbae0",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
