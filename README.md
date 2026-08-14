@@ -203,8 +203,10 @@ update. Each comment records the `frameVersion` it was left on.
   middle-drag pans, `⌘0` resets, `⌘1` zooms to fit.
 - `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
   at that frame-local coordinate and opens a composer. `esc` cancels.
-- Click a frame to select it (its label and outline pick up the accent). `f` fits the selection
-  to the viewport; `⌘1` fits everything.
+- Click a frame to select it (its label and outline pick up the accent). `f` or `⌘0` fits the
+  selection to the viewport; `⌘1` fits everything.
+- Drag a frame's **title** to move it. The title is the handle, so dragging never fights with
+  clicking into the page itself. The move is written once on release.
 - Click a pin to open its thread — reply, resolve, or delete there.
 - Frames land in rows, wrapping about three wide, rather than marching off to the right forever.
   Placement checks every existing frame, so a new frame never lands on one — including after a

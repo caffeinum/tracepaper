@@ -172,7 +172,6 @@ const layer = el<HTMLDivElement>("layer");
 const toasts = el<HTMLDivElement>("toasts");
 const emptyState = el<HTMLDivElement>("empty");
 const commentList = el<HTMLDivElement>("comment-list");
-const statFrames = el<HTMLSpanElement>("stat-frames");
 const statOpen = el<HTMLSpanElement>("stat-open");
 const conn = el<HTMLDivElement>("conn");
 const toolComment = el<HTMLButtonElement>("tool-comment");
@@ -430,6 +429,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   name.className = "frame-name";
   const dims = document.createElement("span");
   dims.className = "frame-dims";
+  makeDraggable(name, frame.id);
   const kill = document.createElement("button");
   kill.className = "frame-kill";
   kill.type = "button";
@@ -518,6 +518,63 @@ function renderFrames(): void {
     frameNodes.delete(id);
   }
   emptyState.hidden = frames.size > 0;
+}
+
+/**
+ * Drag a frame's title to move the frame. The title is the handle rather than the frame body
+ * because the body is an iframe the human may want to click into — and because the label is
+ * the one part of a frame that is unambiguously chrome.
+ *
+ * The move is applied to the DOM as you drag and written once on release, so a drag is one
+ * request rather than one per pointer event.
+ */
+function makeDraggable(handle: HTMLElement, frameId: string): void {
+  handle.classList.add("is-handle");
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || mode === "comment") return;
+    const frame = frames.get(frameId);
+    if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
+    event.preventDefault();
+    event.stopPropagation(); // the stage would otherwise start panning
+
+    const node = frameNodes.get(frameId);
+    if (!node) throw new Error(`drag started on a frame with no node: ${frameId}`);
+    setSelected(frameId);
+
+    const startWorld = screenToWorld(stagePoint(event));
+    const origin = { x: frame.x, y: frame.y };
+    let next = origin;
+    handle.setPointerCapture(event.pointerId);
+
+    const onMove = (move: PointerEvent): void => {
+      const world = screenToWorld(stagePoint(move));
+      next = {
+        x: Math.round(origin.x + (world.x - startWorld.x)),
+        y: Math.round(origin.y + (world.y - startWorld.y)),
+      };
+      node.root.style.transform = `translate(${next.x}px, ${next.y}px)`;
+    };
+
+    const onUp = (): void => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      if (next.x === origin.x && next.y === origin.y) return;
+
+      // Optimistic locally, then persisted; a failure snaps back rather than lying.
+      putFrame({ ...frame, x: next.x, y: next.y });
+      renderAll();
+      patchJson(`/api/frames/${frameId}`, next).catch((error: unknown) => {
+        putFrame({ ...frame, x: origin.x, y: origin.y });
+        renderAll();
+        fail(error instanceof Error ? error : new Error(String(error)));
+      });
+    };
+
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
 }
 
 // ---------------------------------------------------------------- pins
@@ -907,7 +964,6 @@ function renderSidebar(): void {
     commentList.appendChild(note);
   }
 
-  statFrames.textContent = `${frames.size} ${frames.size === 1 ? "frame" : "frames"}`;
   statOpen.textContent = `${open} open`;
 
   // The list is closed by default, so the badge is the only thing telling you there is
@@ -1070,6 +1126,10 @@ function typingInField(): boolean {
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "0") {
     event.preventDefault();
+    if (selectedFrameId !== null) {
+      fitFrame(selectedFrameId);
+      return;
+    }
     resetZoom();
     return;
   }

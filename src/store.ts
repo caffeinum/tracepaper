@@ -597,6 +597,19 @@ export class Store {
    * every new frame is further from the last, so a canvas with a handful of frames can only be
    * read by panning sideways and zoom-to-fit shrinks everything to nothing.
    */
+  /** Moves a frame. Position is the only thing the canvas lets a human change directly. */
+  moveFrame(frameId: string, x: number, y: number): Frame {
+    const row = this.db
+      .query("UPDATE frames SET x = $x, y = $y WHERE id = $id RETURNING *")
+      .get({ $x: x, $y: y, $id: frameId }) as FrameRow | null;
+    if (row === null) {
+      throw new Error(
+        `unknown frame: ${frameId} — call list_frames for the current frame ids, or omit frameId to create a new frame.`,
+      );
+    }
+    return FrameSchema.parse(row);
+  }
+
   /**
    * Re-packs every frame from scratch, biggest first, preserving nothing but the frames
    * themselves. For a canvas that already overlaps — because it was built before placement

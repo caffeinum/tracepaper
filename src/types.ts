@@ -200,6 +200,10 @@ export const CreateCommentBodySchema = z
   .strict();
 export type CreateCommentBody = z.infer<typeof CreateCommentBodySchema>;
 
+/** PATCH /api/frames/:id — moving a frame is the one edit the canvas itself makes. */
+export const MoveFrameBodySchema = z.object({ x: z.number(), y: z.number() }).strict();
+export type MoveFrameBody = z.infer<typeof MoveFrameBodySchema>;
+
 /** PATCH /api/comments/:id */
 export const UpdateCommentBodySchema = z
   .object({

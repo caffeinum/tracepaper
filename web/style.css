@@ -438,8 +438,22 @@ code {
   cursor: grabbing;
 }
 
-.stage[data-mode="comment"] .viewport {
-  cursor: crosshair;
+/* A speech-bubble cursor, so comment mode is legible without reading the toolbar. The overlay
+   above each iframe needs it too — it is what the pointer is actually over on a frame. */
+.stage[data-mode="comment"] .viewport,
+.stage[data-mode="comment"] .frame-catch {
+  cursor:
+    url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M3.5 3.5h21v14.5H12l-6 5v-5H3.5z' fill='%23ffffff' stroke='%231c1a17' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E")
+      3 3,
+    crosshair;
+}
+
+.frame-name.is-handle {
+  cursor: grab;
+}
+
+.frame-name.is-handle:active {
+  cursor: grabbing;
 }
 
 .world {

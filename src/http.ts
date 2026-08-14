@@ -10,6 +10,7 @@ import {
   CreateOrUpdateFrameBodySchema,
   HealthSchema,
   ListCommentsQuerySchema,
+  MoveFrameBodySchema,
   UpdateCommentBodySchema,
   type Comment,
 } from "./types.ts";
@@ -192,6 +193,7 @@ async function route(ctx: Context): Promise<Response> {
     const frameId = matchPrefix(path, "/api/frames/");
     if (frameId !== null) {
       if (method === "GET") return handleGetFrame(ctx, frameId);
+      if (method === "PATCH") return await handleMoveFrame(ctx, frameId);
       if (method === "DELETE") return handleDeleteFrame(ctx, frameId);
       return methodNotAllowed(method, path);
     }
@@ -282,6 +284,17 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
   const frame = ctx.store.createFrame({ html, name, width, height, x, y });
   ctx.bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
   return json(frame, 201);
+}
+
+async function handleMoveFrame(ctx: Context, id: string): Promise<Response> {
+  const body = await readJson(ctx.request);
+  if (body instanceof Response) return body;
+  const parsed = MoveFrameBodySchema.safeParse(body);
+  if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
+
+  const frame = ctx.store.moveFrame(id, parsed.data.x, parsed.data.y);
+  ctx.bus.emit({ type: "frame.updated", frame: toFramePayload(frame) });
+  return json(frame);
 }
 
 function handleDeleteFrame(ctx: Context, id: string): Response {

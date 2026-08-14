@@ -151,6 +151,7 @@ this session must read it back first or it silently discards the design.
 | GET | `/api/frames` | frame list (no html) |
 | GET | `/api/frames/:id` | frame incl. html |
 | POST | `/api/frames` | create/update (same shape as `push_html`) |
+| PATCH | `/api/frames/:id` | `{x, y}` — move a frame; the one edit the canvas itself makes |
 | DELETE | `/api/frames/:id` | delete |
 | GET | `/f/:id` | frame html, served as `text/html` for the iframe `src`, with the escape bridge appended |
 | GET | `/api/comments?frameId=&since=&includeResolved=` | list |
