@@ -17,25 +17,31 @@ open browser within seconds, and a human's comment is readable by the agent on t
 One line, nothing to clone and nothing to build:
 
 ```sh
-claude mcp add tracepaper -- npx -y github:caffeinum/tracepaper
+claude mcp add tracepaper -- bunx github:caffeinum/tracepaper
 ```
 
 or in any MCP client's JSON:
 
 ```json
-{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "github:caffeinum/tracepaper"] } } }
+{ "mcpServers": { "tracepaper": { "command": "bunx", "args": ["github:caffeinum/tracepaper"] } } }
 ```
 
-That is the whole install. `npx` resolves the GitHub repo directly — no npm package needed —
+That is the whole install. `bunx` resolves the GitHub repo directly — no npm package needed —
 and the canvas bundle compiles itself on first boot.
 
-Requires [Bun](https://bun.sh) 1.3+, since the server uses `bun:sqlite` and `Bun.serve`. The
-`bin` is a plain Node launcher that hands off to Bun, so on a machine without it you get an
-install line rather than a missing-interpreter error:
+Requires [Bun](https://bun.sh) 1.3+, since the server uses `bun:sqlite` and `Bun.serve`:
 
 ```sh
 curl -fsSL https://bun.sh/install | bash
 ```
+
+`npx -y github:caffeinum/tracepaper` also works — the `bin` is a plain Node launcher that
+execs Bun, and prints an install line rather than a missing-interpreter error when Bun is
+absent. But it needs Node *and* Bun to run one Bun program, so prefer `bunx`.
+
+> **Both `bunx` and `npx` cache the fetched repo.** If you are changing tracepaper, point the
+> client at your clone (`bun run /path/to/tracepaper/src/index.ts`) — otherwise your agent can
+> sit on a weeks-old copy while you edit, with no sign that it is happening.
 
 ### From a clone
 
