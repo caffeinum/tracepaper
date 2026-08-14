@@ -1,0 +1,22 @@
+LICENSE
+  s_7adfa64874e58c::t_11d4e23feb7849 1-21
+README.md
+  s_7adfa64874e58c::t_c71fd9e87aa2c2 12-15
+  s_7adfa64874e58c::t_9870b5cfd829fa 321-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f271bcc5d3ad77451e5166f0fe8bd6d7a0742133",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "unknown"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
