@@ -124,6 +124,28 @@ The second prints a `canvasUrl` — open it and the frame is there. That frame i
 on your canvas: delete it from the pin menu, or
 `mcpt call delete_frame --params '{"frameId":"frm_…"}' bun run src/index.ts`.
 
+## Sharing
+
+Click **Share** in the toolbar. tracepaper runs [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+for you and hands back a public URL anyone can open — no account, no config, no DNS:
+
+```
+https://trustee-borough-contemporary-molecular.trycloudflare.com
+```
+
+While a share is live it becomes the canvas's address: every tool returns it as `canvasUrl`,
+so the agent hands out a link that works for someone who is not at your machine. Stop sharing
+and it reverts to localhost. Requires `cloudflared` on PATH (`brew install cloudflared`); the
+panel says so if it is missing.
+
+Read the warnings in the panel — they are real:
+
+- **anyone with the link can view every frame and post comments.** There is no sign-in, and a
+  comment is read by your agent as feedback. Only share where you would share a screen.
+- **the link dies with the server**, and each share mints a new one. It is not a stable address.
+- **updates reach visitors within a few seconds, not instantly** — a quick tunnel does not carry
+  the SSE stream, so the canvas falls back to its periodic refetch. Measured: 0–5s.
+
 ## Tools
 
 | tool | what it does |

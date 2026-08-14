@@ -522,3 +522,64 @@ describe("static files", () => {
     }
   });
 });
+
+describe("share", () => {
+  test("reports unavailable when no tunnel is wired in", async () => {
+    const res = await fetch(`${base}/api/share`);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { status: string }).toEqual({ status: "unavailable" });
+  });
+
+  test("starting a share without a tunnel is a loud 501, not a silent no-op", async () => {
+    const res = await post("/api/share", {});
+    expect(res.status).toBe(501);
+    expect((await res.json()) as { error: string }).toHaveProperty("error");
+  });
+
+  test("share state is readable, startable and stoppable through the route", async () => {
+    // A stub standing in for cloudflared: the route contract is what matters here, and
+    // spawning a real tunnel in a unit test would depend on the network.
+    const fake = {
+      state: { status: "off" } as { status: string; url?: string },
+      current() {
+        return this.state;
+      },
+      async start() {
+        this.state = { status: "on", url: "https://example.trycloudflare.com" };
+        return this.state;
+      },
+      stop() {
+        this.state = { status: "off" };
+      },
+    };
+    const store2 = new Store(":memory:");
+    const server2 = startHttpServer({
+      store: store2,
+      bus: new Bus(),
+      port: 0,
+      host: "127.0.0.1",
+      webDir,
+      tunnel: fake as never,
+    });
+    const at = server2.url;
+
+    expect(await (await fetch(`${at}/api/share`)).json()).toEqual({ status: "off" });
+
+    const started = await fetch(`${at}/api/share`, { method: "POST", headers: WRITE_HEADERS });
+    expect(started.status).toBe(200);
+    expect(await started.json()).toEqual({
+      status: "on",
+      url: "https://example.trycloudflare.com",
+    });
+
+    const stopped = await fetch(`${at}/api/share`, { method: "DELETE", headers: WRITE_HEADERS });
+    expect(await stopped.json()).toEqual({ status: "off" });
+
+    // and a share cannot be started by a cross-document request
+    const refused = await fetch(`${at}/api/share`, { method: "POST" });
+    expect(refused.status).toBe(403);
+
+    server2.stop();
+    store2.close();
+  });
+});

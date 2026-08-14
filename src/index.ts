@@ -8,6 +8,7 @@ import { Bus } from "./events.ts";
 import { startHttpServer, type HttpServer } from "./http.ts";
 import { createMcpServer } from "./mcp.ts";
 import { Store } from "./store.ts";
+import { RemoteTunnelView, Tunnel } from "./tunnel.ts";
 
 type Mode = "stdio" | "serve";
 
@@ -83,16 +84,34 @@ async function main(): Promise<void> {
   const bus = new Bus();
 
   const live = mode === "stdio" ? await findLiveServer(config) : null;
+  const localUrl = live ?? `http://${config.host}:${config.port}`;
+  // Only the process that owns the http server owns a tunnel; a joined stdio process watches
+  // the owner's instead, so a Share click in the browser reaches the agent's canvasUrl too.
+  const tunnel = live === null ? new Tunnel(localUrl) : null;
+  const remoteShare = live === null ? null : new RemoteTunnelView(live);
+  remoteShare?.start();
   const http =
-    live === null ? startHttpServer({ store, bus, port: config.port, host: config.host }) : null;
+    tunnel === null
+      ? null
+      : startHttpServer({ store, bus, port: config.port, host: config.host, tunnel });
 
   if (http !== null) writeServerJson(config, http, mode);
-  const canvasUrl = live ?? http?.url;
-  if (canvasUrl === undefined) throw new Error("no canvas url: neither a live nor a new server");
+  const localCanvasUrl = live ?? http?.url;
+  if (localCanvasUrl === undefined) {
+    throw new Error("no canvas url: neither a live nor a new server");
+  }
+  // While a tunnel is up its hostname IS the canvas's address: every tool hands the agent a URL
+  // it can pass to someone who is not sitting at this machine. Without this, `canvasUrl` is
+  // http://127.0.0.1:… (or 0.0.0.0 when bound wide), which is useless to anyone else.
+  const canvasUrl = (): string => {
+    const own = tunnel?.current();
+    if (own?.status === "on") return own.url;
+    return remoteShare?.publicUrl() ?? localCanvasUrl;
+  };
   console.error(
     live === null
-      ? `[tracepaper] canvas at ${canvasUrl}  db=${config.dbPath}  mode=${mode}`
-      : `[tracepaper] joining the canvas already serving this db at ${canvasUrl}`,
+      ? `[tracepaper] canvas at ${localCanvasUrl}  db=${config.dbPath}  mode=${mode}`
+      : `[tracepaper] joining the canvas already serving this db at ${localCanvasUrl}`,
   );
 
   let shuttingDown = false;
@@ -100,6 +119,8 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.error(`[tracepaper] ${signal} — shutting down`);
+    tunnel?.stop();
+    remoteShare?.stop();
     http?.stop();
     store.close();
     process.exit(0);
@@ -112,7 +133,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const server = createMcpServer({ store, bus, baseUrl: () => canvasUrl });
+  const server = createMcpServer({ store, bus, baseUrl: canvasUrl });
   await server.connect(tolerateAbsentToolArguments(new StdioServerTransport()));
   // The http server holds the process open, so a hung-up client must be shut down explicitly.
   // The SDK's stdio transport never watches stdin for EOF, so watch it here.

@@ -181,6 +181,11 @@ const commentsBadge = el<HTMLSpanElement>("tool-comments-badge");
 const sidebar = el<HTMLElement>("sidebar");
 const sidebarClose = el<HTMLButtonElement>("sidebar-close");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
+const toolShare = el<HTMLButtonElement>("tool-share");
+const toolShareLabel = el<HTMLSpanElement>("tool-share-label");
+const sharePanel = el<HTMLElement>("share");
+const shareBody = el<HTMLDivElement>("share-body");
+const shareClose = el<HTMLButtonElement>("share-close");
 
 // ---------------------------------------------------------------- state
 
@@ -1223,6 +1228,107 @@ function listenForFrameEscape(): void {
   });
 }
 
+// ---------------------------------------------------------------- sharing
+
+type ShareState =
+  | { status: "off" }
+  | { status: "starting" }
+  | { status: "unavailable" }
+  | { status: "on"; url: string }
+  | { status: "error"; message: string };
+
+function renderShare(state: ShareState): void {
+  shareBody.replaceChildren();
+  toolShareLabel.textContent = state.status === "on" ? "Shared" : "Share";
+  toolShare.classList.toggle("is-on", state.status === "on");
+
+  const note = (text: string, warn = false): HTMLParagraphElement => {
+    const p = document.createElement("p");
+    p.className = warn ? "share-note share-warn" : "share-note";
+    p.textContent = text;
+    return p;
+  };
+
+  if (state.status === "unavailable") {
+    shareBody.append(note("Sharing is not available in this mode."));
+    return;
+  }
+  if (state.status === "starting") {
+    shareBody.append(note("Opening a tunnel… this usually takes about ten seconds."));
+    return;
+  }
+  if (state.status === "error") {
+    shareBody.append(note(state.message, true));
+    return;
+  }
+  if (state.status === "off") {
+    const start = document.createElement("button");
+    start.className = "ghost-btn";
+    start.type = "button";
+    start.textContent = "Create public link";
+    start.addEventListener("click", () => void setShare("start"));
+    shareBody.append(
+      note("Publishes this canvas on a temporary public URL so anyone you send it to can view and comment."),
+      start,
+    );
+    return;
+  }
+
+  const row = document.createElement("div");
+  row.className = "share-url";
+  const field = document.createElement("input");
+  field.readOnly = true;
+  field.value = state.url;
+  field.addEventListener("focus", () => field.select());
+  const copy = document.createElement("button");
+  copy.className = "ghost-btn";
+  copy.type = "button";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", () => {
+    void navigator.clipboard.writeText(state.url).then(() => {
+      copy.textContent = "Copied";
+      setTimeout(() => (copy.textContent = "Copy"), 1200);
+    });
+  });
+  const stop = document.createElement("button");
+  stop.className = "ghost-btn";
+  stop.type = "button";
+  stop.textContent = "Stop sharing";
+  stop.addEventListener("click", () => void setShare("stop"));
+  row.append(field, copy);
+
+  shareBody.append(
+    row,
+    // Said plainly, because none of it is guessable from a URL box.
+    note(
+      "Anyone with this link can view every frame and post comments — there is no sign-in. " +
+        "The link dies when this server stops, and a new one is issued each time you share.",
+      true,
+    ),
+    note("Updates reach visitors within a few seconds rather than instantly: the tunnel does not carry the live event stream."),
+    stop,
+  );
+}
+
+async function setShare(action: "start" | "stop" | "read"): Promise<void> {
+  if (action === "start") renderShare({ status: "starting" });
+  const method = action === "start" ? "POST" : action === "stop" ? "DELETE" : "GET";
+  const init: RequestInit = action === "read" ? {} : { method, headers: WRITE_HEADERS };
+  const payload = await api("/api/share", init).catch((error: unknown) => {
+    renderShare({ status: "error", message: error instanceof Error ? error.message : String(error) });
+    return null;
+  });
+  if (payload === null) return;
+  renderShare(payload as ShareState);
+}
+
+toolShare.addEventListener("click", () => {
+  const opening = sharePanel.hidden;
+  sharePanel.hidden = !opening;
+  if (opening) void setShare("read");
+});
+shareClose.addEventListener("click", () => (sharePanel.hidden = true));
+
 function subscribe(): void {
   const source = new EventSource("/api/events");
   let wasDown = false;
@@ -1302,4 +1408,5 @@ zoomToFit();
 loadAll().catch(fail);
 subscribe();
 reconcile();
+void setShare("read");
 listenForFrameEscape();

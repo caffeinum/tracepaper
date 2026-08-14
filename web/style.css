@@ -1035,3 +1035,79 @@ button.btn.danger:hover {
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* ---------- share panel ---------- */
+
+.share-panel {
+  position: absolute;
+  z-index: 7;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 32px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.share-panel[hidden] {
+  display: none;
+}
+
+.share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 12px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.share-body {
+  padding: 14px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  display: grid;
+  gap: 10px;
+}
+
+.share-url {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.share-url input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-s);
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+.share-note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.55;
+}
+
+.share-warn {
+  color: var(--accent);
+}
+
+.tool.is-on {
+  color: var(--accent);
+}

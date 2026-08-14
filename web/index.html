@@ -80,6 +80,19 @@
           </button>
           <span class="tool-sep" aria-hidden="true"></span>
           <button id="tool-fit" class="tool" type="button" title="Zoom to fit (⌘1)">Fit</button>
+          <span class="tool-sep" aria-hidden="true"></span>
+          <button id="tool-share" class="tool" type="button" title="Get a public link to this canvas">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 6.5 10 3l3.5 3.5M4 12v3a2 2 0 002 2h8a2 2 0 002-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="tool-share-label">Share</span>
+          </button>
+        </div>
+
+        <div id="share" class="share-panel" hidden>
+          <div class="share-head">
+            <span class="share-title">Public link</span>
+            <button id="share-close" class="ghost-btn" type="button">Close</button>
+          </div>
+          <div id="share-body" class="share-body"></div>
         </div>
 
         <div id="layer" class="layer"></div>

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
 import type { Store } from "./store.ts";
+import type { Tunnel } from "./tunnel.ts";
 import {
   CreateCommentBodySchema,
   CreateOrUpdateFrameBodySchema,
@@ -45,6 +46,8 @@ export type HttpServerOptions = {
   bus: Bus;
   port: number;
   host: string;
+  /** Optional: when present, /api/share can open a public URL for this canvas. */
+  tunnel?: Tunnel;
   /** Canvas app root. Defaults to the repo's `web/` directory, resolved from this module. */
   webDir?: string;
 };
@@ -56,13 +59,13 @@ export type HttpServer = {
 };
 
 export function startHttpServer(options: HttpServerOptions): HttpServer {
-  const { store, bus, port, host } = options;
+  const { store, bus, port, host, tunnel } = options;
   const webDir = options.webDir === undefined ? DEFAULT_WEB_DIR : resolve(options.webDir);
   assertCanvasBuilt(webDir);
   const closeStream = new Set<() => void>();
 
   const handler = (request: Request): Response | Promise<Response> =>
-    route({ request, store, bus, webDir, closeStream });
+    route({ request, store, bus, webDir, closeStream, tunnel });
 
   const server = listen(handler, port, host);
   const bound = server.port;
@@ -125,6 +128,7 @@ type Context = {
   bus: Bus;
   webDir: string;
   closeStream: Set<() => void>;
+  tunnel?: Tunnel | undefined;
 };
 
 const MUTATING = new Set(["POST", "PATCH", "DELETE"]);
@@ -170,6 +174,13 @@ async function route(ctx: Context): Promise<Response> {
 
   try {
     if (path === "/api/health" && method === "GET") return handleHealth(ctx);
+
+    if (path === "/api/share") {
+      if (method === "GET") return handleShareState(ctx);
+      if (method === "POST") return await handleShareStart(ctx);
+      if (method === "DELETE") return handleShareStop(ctx);
+      return methodNotAllowed(method, path);
+    }
     if (path === "/api/events" && method === "GET") return handleEvents(ctx);
 
     if (path === "/api/frames") {
@@ -219,6 +230,27 @@ function matchPrefix(path: string, prefix: string): string | null {
 }
 
 // ---------- handlers ----------
+
+function handleShareState(ctx: Context): Response {
+  if (ctx.tunnel === undefined) return json({ status: "unavailable" });
+  return json(ctx.tunnel.current());
+}
+
+async function handleShareStart(ctx: Context): Promise<Response> {
+  if (ctx.tunnel === undefined) {
+    return json({ error: "sharing is not available in this mode" }, 501);
+  }
+  const state = await ctx.tunnel.start();
+  return json(state, state.status === "error" ? 500 : 200);
+}
+
+function handleShareStop(ctx: Context): Response {
+  if (ctx.tunnel === undefined) {
+    return json({ error: "sharing is not available in this mode" }, 501);
+  }
+  ctx.tunnel.stop();
+  return json(ctx.tunnel.current());
+}
 
 function handleHealth(ctx: Context): Response {
   const { frames, comments } = ctx.store.counts();
