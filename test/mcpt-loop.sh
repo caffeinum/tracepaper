@@ -92,9 +92,9 @@ curl -fsS "$BASE/api/health" >/dev/null || fail "http server never came up (see 
 
 # ---------- the loop ----------
 
-step "tools — all seven are advertised to an outside client"
+step "tools — all eight are advertised to an outside client"
 TOOLS="$(TRACEPAPER_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
-for tool in push_html get_comments get_frame list_frames resolve_comment reply_to_comment delete_frame; do
+for tool in push_html get_comments get_frame list_frames resolve_comment reply_to_comment tidy_canvas delete_frame; do
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
 

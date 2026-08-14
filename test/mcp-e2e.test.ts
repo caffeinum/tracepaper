@@ -36,6 +36,7 @@ const TOOL_NAMES = [
   "push_html",
   "reply_to_comment",
   "resolve_comment",
+  "tidy_canvas",
 ];
 const EXIT_TIMEOUT_MS = 5000;
 /** Must exceed EXIT_TIMEOUT_MS, or bun's own timeout aborts the test before its cleanup runs. */

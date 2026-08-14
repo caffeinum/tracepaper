@@ -103,6 +103,14 @@ const GET_FRAME_DESCRIPTION = [
   "silently discards whatever is already there.",
 ].join("\n");
 
+const TIDY_CANVAS_DESCRIPTION = [
+  "Re-pack every frame into clean rows, largest first, so nothing overlaps.",
+  "Use it when frames are sitting on top of each other — usually because they were placed by",
+  "hand with x/y, or resized after placement. It moves frames only; html, comments and pins are",
+  "untouched. Positions are not recoverable afterwards, so do not run it on a canvas whose",
+  "layout the human arranged deliberately without asking them first.",
+].join("\n");
+
 const DELETE_FRAME_DESCRIPTION = [
   "Remove a frame from the canvas along with every comment on it. Irreversible.",
 ].join("\n");
@@ -360,6 +368,34 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
             "Current HTML follows. push_html with this frameId replaces all of it.",
             "",
             frame.html,
+          ].join("\n"),
+          result,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "tidy_canvas",
+    {
+      title: "Re-pack frames so none overlap",
+      description: TIDY_CANVAS_DESCRIPTION,
+      inputSchema: {},
+      outputSchema: ListFramesResultSchema,
+    },
+    () => {
+      try {
+        const frames = store.tidyFrames();
+        for (const frame of frames) {
+          bus.emit({ type: "frame.updated", frame: toFramePayload({ ...frame, html: "" }) });
+        }
+        const result: ListFramesResult = { frames, canvasUrl: canvasUrl() };
+        return structuredResult(
+          [
+            `Re-packed ${frames.length} frame(s); nothing overlaps now.`,
+            ...frames.map((f) => `- ${f.id} "${f.name}" ${f.width}x${f.height} @ (${f.x},${f.y})`),
           ].join("\n"),
           result,
         );

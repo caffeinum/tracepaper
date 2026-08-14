@@ -156,6 +156,7 @@ Read the warnings in the panel — they are real:
 | `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
 | `reply_to_comment` | `{commentId, text}` — posts a threaded reply as `"agent"`; it appears live in the human's open thread. |
 | `resolve_comment` | `{commentId, note?}` — closes the thread so it drops out of `get_comments`; `note` is also posted as an agent reply. Replies are resolved with their root, so your own note does not come back as fresh feedback on the next poll. |
+| `tidy_canvas` | `{}` — re-packs every frame into clean rows, largest first, so nothing overlaps. Moves frames only; html, comments and pins are untouched. |
 | `delete_frame` | `{frameId}` — removes a frame and its comments. |
 
 ## The loop
@@ -206,7 +207,8 @@ update. Each comment records the `frameVersion` it was left on.
   to the viewport; `⌘1` fits everything.
 - Click a pin to open its thread — reply, resolve, or delete there.
 - Frames land in rows, wrapping about three wide, rather than marching off to the right forever.
-  An agent can place them deliberately with `x`/`y`.
+  Placement checks every existing frame, so a new frame never lands on one — including after a
+  resize or an explicit `x`/`y`. `tidy_canvas` re-packs a canvas that is already tangled.
 - Sound inside a frame works once you interact with it. Autoplay on load is blocked by the
   browser's policy for sandboxed frames, which is the behaviour you want — a canvas full of
   frames cannot start making noise on its own.

@@ -630,14 +630,15 @@ describe("frame layout", () => {
     s.close();
   });
 
-  test("an explicit x/y is honoured exactly, and later frames continue from that row", () => {
+  test("an explicit x/y is honoured exactly, and auto-placement fills from the top", () => {
     const s = store();
     const placed = s.createFrame({ html: "<p>placed</p>", x: 640, y: 2000, width: 400 });
     expect([placed.x, placed.y]).toEqual([640, 2000]);
 
-    const next = s.createFrame({ html: "<p>next</p>", width: 400 });
-    expect(next.y).toBe(2000);
-    expect(next.x).toBe(640 + 400 + 120);
+    // Auto-placement packs from the top-left into the first free slot rather than trailing
+    // whatever was placed last — that is what keeps it from landing on existing frames.
+    const next = s.createFrame({ html: "<p>next</p>", width: 400, height: 300 });
+    expect([next.x, next.y]).toEqual([0, 0]);
     s.close();
   });
 
@@ -647,6 +648,78 @@ describe("frame layout", () => {
     const huge = s.createFrame({ html: "<p>huge</p>", width: 9000 });
     expect(huge.x).toBe(0);
     expect(huge.y).toBeGreaterThan(0);
+    s.close();
+  });
+});
+
+describe("frames never overlap", () => {
+  function overlapping(s: Store) {
+    const fs = s.listFrames();
+    const bad: string[] = [];
+    for (let i = 0; i < fs.length; i++) {
+      for (let j = i + 1; j < fs.length; j++) {
+        const a = fs[i]!, b = fs[j]!;
+        if (
+          a.x < b.x + b.width && b.x < a.x + a.width &&
+          a.y < b.y + b.height && b.y < a.y + a.height
+        ) bad.push(`${a.name} <-> ${b.name}`);
+      }
+    }
+    return bad;
+  }
+
+  test("a frame placed by hand does not get another dropped on top of it", () => {
+    const s = store();
+    // This is the shape that broke: an explicit placement, then auto-placements computed
+    // against it. The old row-tracking layout only looked at the last row and collided.
+    s.createFrame({ html: "<p>a</p>", name: "hand", x: 0, y: 0, width: 1500, height: 1420 });
+    s.createFrame({ html: "<p>b</p>", name: "auto1", width: 900, height: 620 });
+    s.createFrame({ html: "<p>c</p>", name: "auto2", width: 1500, height: 1000 });
+    s.createFrame({ html: "<p>d</p>", name: "auto3", width: 1080, height: 680 });
+    expect(overlapping(s)).toEqual([]);
+    s.close();
+  });
+
+  test("resizing a frame does not make later placements land on it", () => {
+    const s = store();
+    const small = s.createFrame({ html: "<p>a</p>", name: "grower", width: 400, height: 300 });
+    s.createFrame({ html: "<p>b</p>", name: "beside", width: 400, height: 300 });
+    // The frame grows tall enough to reach into the row below.
+    s.updateFrameHtml(small.id, "<p>a2</p>", { width: 400, height: 3000 });
+    s.createFrame({ html: "<p>c</p>", name: "after", width: 1280, height: 800 });
+    s.createFrame({ html: "<p>d</p>", name: "after2", width: 1280, height: 800 });
+    expect(overlapping(s)).toEqual([]);
+    s.close();
+  });
+
+  test("twenty mixed-size frames all land clear of each other", () => {
+    const s = store();
+    for (let i = 0; i < 20; i++) {
+      s.createFrame({
+        html: `<p>${i}</p>`,
+        name: `f${i}`,
+        width: 300 + ((i * 260) % 1500),
+        height: 200 + ((i * 190) % 1200),
+      });
+    }
+    expect(overlapping(s)).toEqual([]);
+    expect(s.listFrames()).toHaveLength(20);
+    s.close();
+  });
+
+  test("tidyFrames untangles a canvas that is already a pile", () => {
+    const s = store();
+    // Deliberately stack everything at the origin, as the reported canvas had.
+    for (let i = 0; i < 8; i++) {
+      s.createFrame({ html: `<p>${i}</p>`, name: `p${i}`, x: 0, y: 0, width: 900, height: 700 });
+    }
+    expect(overlapping(s).length).toBeGreaterThan(0);
+
+    const tidied = s.tidyFrames();
+    expect(tidied).toHaveLength(8);
+    expect(overlapping(s)).toEqual([]);
+    // It moves frames only — nothing is lost.
+    expect(s.counts().frames).toBe(8);
     s.close();
   });
 });

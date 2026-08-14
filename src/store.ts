@@ -123,6 +123,55 @@ type CommentRow = {
 const COMMENT_COLUMNS =
   "id, frameId, x, y, text, author, parentId, resolved, frameVersion, createdAt";
 
+type Box = { x: number; y: number; width: number; height: number };
+
+function overlaps(a: Box, b: Box): boolean {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}
+
+/**
+ * Finds a spot that overlaps nothing already on the canvas.
+ *
+ * The previous version tracked only "the last row" and its tallest frame, which quietly breaks
+ * the moment the canvas stops being append-only: resize a frame, or place one explicitly with
+ * x/y, and later auto-placements are computed against stale row geometry and land on top of
+ * existing work. Checking every frame is O(n) per placement on a canvas of tens of frames —
+ * far cheaper than a human untangling a pile of overlapping mockups.
+ *
+ * Shelf packing: walk candidate rows top-down, slide right past whatever is in the way, and drop
+ * to the next row when the shelf is full.
+ */
+function findFreeSlot(boxes: Box[], width: number, height: number): { x: number; y: number } {
+  const rows = [0, ...boxes.map((b) => b.y + b.height + FRAME_GAP)].sort((a, b) => a - b);
+  const seen = new Set<number>();
+
+  for (const y of rows) {
+    if (seen.has(y)) continue;
+    seen.add(y);
+
+    let x = 0;
+    // A frame wider than the shelf still has to land somewhere, so only wrap when the row has
+    // something in it already — otherwise an oversized frame would skip every row forever.
+    while (x === 0 || x + width <= ROW_MAX_WIDTH) {
+      const candidate = { x, y, width, height };
+      const blocking = boxes.filter((b) => overlaps(candidate, b));
+      if (blocking.length === 0) return { x, y };
+      const nextX = Math.max(...blocking.map((b) => b.x + b.width)) + FRAME_GAP;
+      if (nextX <= x) break; // cannot make progress; try the next row
+      x = nextX;
+    }
+  }
+
+  // Every shelf is occupied: start a fresh one below everything.
+  const floor = Math.max(...boxes.map((b) => b.y + b.height));
+  return { x: 0, y: floor + FRAME_GAP };
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -212,7 +261,7 @@ export class Store {
   }): Frame {
     const { html, name, width, height } = input;
     const at = nowIso();
-    const auto = this.nextFramePosition(width);
+    const auto = this.nextFramePosition(width, height);
     const frame: Frame = {
       id: newFrameId(),
       name: name === undefined ? this.nextFrameName() : name,
@@ -548,18 +597,35 @@ export class Store {
    * every new frame is further from the last, so a canvas with a handful of frames can only be
    * read by panning sideways and zoom-to-fit shrinks everything to nothing.
    */
-  private nextFramePosition(width: number): { x: number; y: number } {
-    const last = this.db.query("SELECT MAX(y) AS y FROM frames").get() as { y: number | null };
-    if (last.y === null) return { x: 0, y: 0 };
+  /**
+   * Re-packs every frame from scratch, biggest first, preserving nothing but the frames
+   * themselves. For a canvas that already overlaps — because it was built before placement
+   * became collision-aware, or because an agent placed frames by hand badly.
+   */
+  tidyFrames(): FrameSummary[] {
+    return this.db
+      .transaction(() => {
+        const frames = this.db
+          .query("SELECT id, width, height FROM frames ORDER BY height DESC, width DESC, createdAt ASC")
+          .all() as { id: string; width: number; height: number }[];
 
-    const row = this.db
-      .query("SELECT MAX(x + width) AS right, MAX(height) AS tallest FROM frames WHERE y = $y")
-      .get({ $y: last.y }) as { right: number | null; tallest: number | null };
-    if (row.right === null || row.tallest === null) return { x: 0, y: last.y };
+        const placed: Box[] = [];
+        const update = this.db.query("UPDATE frames SET x = $x, y = $y WHERE id = $id");
+        for (const frame of frames) {
+          const at =
+            placed.length === 0 ? { x: 0, y: 0 } : findFreeSlot(placed, frame.width, frame.height);
+          placed.push({ x: at.x, y: at.y, width: frame.width, height: frame.height });
+          update.run({ $x: at.x, $y: at.y, $id: frame.id });
+        }
+        return this.listFrames();
+      })
+      .immediate();
+  }
 
-    const nextX = row.right + FRAME_GAP;
-    if (nextX + width <= ROW_MAX_WIDTH) return { x: nextX, y: last.y };
-    return { x: 0, y: last.y + row.tallest + FRAME_GAP };
+  private nextFramePosition(width: number, height: number): { x: number; y: number } {
+    const boxes = this.db.query("SELECT x, y, width, height FROM frames").all() as Box[];
+    if (boxes.length === 0) return { x: 0, y: 0 };
+    return findFreeSlot(boxes, width, height);
   }
 
   /** Frame.name is required by the data model; push_html's is optional, so unnamed frames get a slot label. */
