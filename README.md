@@ -138,6 +138,11 @@ so the agent hands out a link that works for someone who is not at your machine.
 and it reverts to localhost. Requires `cloudflared` on PATH (`brew install cloudflared`); the
 panel says so if it is missing.
 
+**Linking to one frame.** Select a frame and the address bar becomes
+`…/#frame=frm_abc123`. Send that and it opens zoomed to that frame. It is a **view hint, not a
+permission boundary** — the whole canvas is still there to scroll to, and anyone with the link
+sees all of it either way.
+
 Read the warnings in the panel — they are real:
 
 - **anyone with the link can view every frame and post comments.** There is no sign-in, and a

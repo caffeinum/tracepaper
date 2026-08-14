@@ -217,6 +217,9 @@ Figma-ish, deliberately small:
   agent attached to a *different* process writes to a bus this canvas is not on. The
   canvas also refetches on `visibilitychange`, since a backgrounded tab skips the timer.
 - **Empty state** tells the human the server is up and waiting for the agent.
+- **`#frame=<id>`** in the URL opens the canvas zoomed to that frame, and the hash follows the
+  selection so the address bar is always a shareable deep link. It is a view hint only: no route
+  is scoped by it, and every frame remains reachable.
 
 ## Testing
 

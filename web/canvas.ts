@@ -1016,6 +1016,37 @@ function setInteractive(frameId: string | null): void {
 function setSelected(frameId: string | null): void {
   selectedFrameId = frameId;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-selected", id === frameId);
+  writeFrameHash(frameId);
+}
+
+/**
+ * The address bar follows the selection, so "copy the URL" is the share gesture and needs no
+ * button. replaceState rather than a hash assignment: selecting frames should not fill up the
+ * back button with canvas states.
+ */
+function writeFrameHash(frameId: string | null): void {
+  const next = frameId === null ? "" : `#frame=${frameId}`;
+  if (window.location.hash === next) return;
+  history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next}`);
+}
+
+/**
+ * `#frame=frm_…` is a VIEW HINT, not a permission boundary — it opens the canvas zoomed to one
+ * frame, and everything else is still there to scroll to. Anyone with the link sees the whole
+ * canvas either way.
+ */
+function frameFromHash(): string | null {
+  const match = /^#frame=(frm_[0-9a-f]{12})$/.exec(window.location.hash);
+  return match === null ? null : match[1] ?? null;
+}
+
+/** Returns true when a hinted frame existed and was framed, so the caller can skip zoom-to-fit. */
+function applyFrameHash(animate = false): boolean {
+  const wanted = frameFromHash();
+  if (wanted === null || !frames.has(wanted)) return false;
+  setSelected(wanted);
+  fitFrame(wanted, animate);
+  return true;
 }
 
 function updateCursor(): void {
@@ -1241,7 +1272,7 @@ async function loadAll(): Promise<void> {
   renderAll();
   if (!hasFitted && frames.size > 0) {
     hasFitted = true;
-    zoomToFit();
+    if (!applyFrameHash()) zoomToFit();
   }
 }
 
@@ -1466,6 +1497,10 @@ applyView();
 renderSidebar();
 zoomToFit();
 loadAll().catch(fail);
+window.addEventListener("hashchange", () => {
+  applyFrameHash(true);
+});
+
 subscribe();
 reconcile();
 void setShare("read");
