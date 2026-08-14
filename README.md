@@ -9,6 +9,10 @@ around, and drops pinned comments on the frames. The agent reads those comments 
 through MCP and replies inside the thread. That round trip — **draw → comment → read
 feedback** — is the whole product.
 
+<p align="center">
+  <img src="docs/screenshot.png" width="900" alt="A tracepaper canvas: three HTML frames side by side, numbered comment pins on one of them, and an open comment thread with Resolve and Reply.">
+</p>
+
 One process serves both halves — an MCP server on stdio and the canvas web app over HTTP,
 sharing one SQLite database and one event bus. You start nothing by hand: your MCP client
 launches it, and the canvas comes up with it. An agent's `push_html` shows up in the human's
@@ -314,3 +318,7 @@ then has `mcpt` spawn a fresh stdio server per call against the **same** temp da
 file — so the handoff it proves is a real cross-process one. Note that `mcpt` exits 0 even
 when a tool returns `isError`, so the script checks `isError` itself on every call rather
 than trusting the exit code.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
