@@ -1,3 +1,5 @@
+<img src="web/icon.svg" width="64" height="64" align="right" alt="">
+
 # tracepaper
 
 An MCP server that gives an agent a canvas.
