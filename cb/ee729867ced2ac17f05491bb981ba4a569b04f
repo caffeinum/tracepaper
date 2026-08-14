@@ -1,0 +1,39 @@
+web/style.css
+  s_7adfa64874e58c::t_fb1223344f1ee7 1110-1113
+  s_7adfa64874e58c::t_90ce7c24ec5071 1038-1109
+src/index.ts
+  s_7adfa64874e58c::t_d5d486c072f768 87,99-106,110,113-114,136
+  s_7adfa64874e58c::t_f18e1d851799a7 11,88-92,94-96,107-109,122-123
+web/canvas.ts
+  s_7adfa64874e58c::t_5135a512b8b377 184-188,1231-1233,1237-1331,1411
+  s_7adfa64874e58c::t_fb1223344f1ee7 1234-1236
+web/index.html
+  s_7adfa64874e58c::t_90ce7c24ec5071 83-95
+src/tunnel.ts
+  s_7adfa64874e58c::t_f18e1d851799a7 21-65
+  s_7adfa64874e58c::t_7ce5479c84695b 1-20,66-158
+src/http.ts
+  s_7adfa64874e58c::t_3fa721e8e4948d 7,49-50,62,68,131,177-183,234-253
+  s_7adfa64874e58c::t_94c41d8d1611f0 254
+test/http.test.ts
+  s_7adfa64874e58c::t_b57a639e2d84df 570
+  s_7adfa64874e58c::t_6e52240d8a39bd 525-569,571-585
+README.md
+  s_7adfa64874e58c::t_5d2505940a2785 127-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "cbee729867ced2ac17f05491bb981ba4a569b04f",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
