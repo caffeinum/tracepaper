@@ -1,0 +1,28 @@
+.github/workflows/ci.yml
+  s_7adfa64874e58c::t_84728ed58cc564 1-37,42-49,54-55,58,65
+  s_7adfa64874e58c::t_27c7e711a4a542 38-41,50-53,56-57,59-64
+SPEC.md
+  s_7adfa64874e58c::t_27c7e711a4a542 238
+README.md
+  s_7adfa64874e58c::t_27c7e711a4a542 130,310
+  s_7adfa64874e58c::t_aa57fb2def598b 5-6
+  s_7adfa64874e58c::t_c1b6118cb1e1ce 109
+test/mcpt-loop.sh
+  s_7adfa64874e58c::t_27c7e711a4a542 3,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a106e3181c101786a55092c88c5fbe01cbde8dc1",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
