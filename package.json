@@ -9,7 +9,9 @@
     "bin",
     "src",
     "web",
-    "SPEC.md"
+    "SPEC.md",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "start": "bun run src/index.ts",
@@ -26,5 +28,26 @@
     "@types/bun": "1.3.14",
     "typescript": "7.0.2"
   },
-  "description": "An MCP server that gives an agent a canvas: it pushes HTML frames, you pin comments on them, it reads them back."
+  "description": "An MCP server that gives an agent a canvas: it pushes HTML frames, you pin comments on them, it reads them back.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caffeinum/tracepaper.git"
+  },
+  "homepage": "https://github.com/caffeinum/tracepaper#readme",
+  "bugs": {
+    "url": "https://github.com/caffeinum/tracepaper/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "canvas",
+    "design-review",
+    "comments",
+    "agent",
+    "ai"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  }
 }

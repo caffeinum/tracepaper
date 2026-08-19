@@ -321,6 +321,22 @@ file — so the handoff it proves is a real cross-process one. Note that `mcpt` 
 when a tool returns `isError`, so the script checks `isError` itself on every call rather
 than trusting the exit code.
 
+## Releasing
+
+Publishing to npm is tag-driven, so a release is a decision and not a side effect of a merge:
+
+```sh
+npm version patch      # bumps package.json and writes a v* tag
+git push --follow-tags
+```
+
+The `release` workflow then runs the gate, builds the bundle, checks the tag matches
+`package.json`, and publishes with npm [provenance](https://docs.npmjs.com/generating-provenance-statements).
+It uses npm trusted publishing (OIDC) — configure this repo + the `release` workflow as a
+trusted publisher on npmjs.com and no `NPM_TOKEN` secret is needed; set one as a fallback if
+you would rather. `workflow_dispatch` runs the same steps as a dry-run `npm pack` without
+publishing.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
