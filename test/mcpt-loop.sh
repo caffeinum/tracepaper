@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The push -> comment -> read -> reply -> resolve loop, driven by a client that is NOT our code:
-# the `mcpt` CLI (github.com/f/mcp-tools). Run it from anywhere: `bash test/mcpt-loop.sh`.
+# the `mcpt` CLI (github.com/f/mcptools). Run it from anywhere: `bash test/mcpt-loop.sh`.
 #
 # Topology: mcpt spawns a fresh stdio server per invocation, so the db must be a shared temp
 # FILE (never :memory:) and the human's browser side is one long-lived `serve` process on a
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 if ! command -v mcpt >/dev/null 2>&1; then
-  echo "mcpt is not installed — brew install f/mcptools/mcp (see github.com/f/mcp-tools)" >&2
+  echo "mcpt is not installed — brew install f/mcptools/mcp (see github.com/f/mcptools)" >&2
   exit 127
 fi
 

@@ -235,7 +235,7 @@ calling the handler functions directly.
    `push_html` → POST a comment as a human via HTTP → `get_comments` sees it →
    `reply_to_comment` → `resolve_comment` → `get_comments` no longer returns it.
 3. `test/mcpt-loop.sh` — the same loop driven from outside by the `mcpt` CLI
-   (`f/mcp-tools`), proving the server works for a client that is not our own code.
+   (`f/mcptools`), proving the server works for a client that is not our own code.
    This is not redundant with (2): `mcpt` omits the JSON-RPC `arguments` key entirely
    when a tool takes none, which made every no-argument tool unreachable — invisible to
    an SDK client, which always sends `arguments: {}`. See `src/compat.ts`.

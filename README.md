@@ -2,6 +2,8 @@
 
 # tracepaper
 
+[![ci](https://github.com/caffeinum/tracepaper/actions/workflows/ci.yml/badge.svg)](https://github.com/caffeinum/tracepaper/actions/workflows/ci.yml)
+
 An MCP server that gives an agent a canvas.
 
 The agent pushes HTML frames onto it. A human opens the canvas in a browser, scrolls
@@ -104,7 +106,7 @@ The one-liner above works in every MCP client — Claude Code, Cursor, Windsurf,
 Desktop — via `.mcp.json`, `~/.cursor/mcp.json` or `claude_desktop_config.json`:
 
 ```json
-{ "mcpServers": { "tracepaper": { "command": "npx", "args": ["-y", "github:caffeinum/tracepaper"] } } }
+{ "mcpServers": { "tracepaper": { "command": "bunx", "args": ["github:caffeinum/tracepaper"] } } }
 ```
 
 Running from a clone instead? Point at the entry file, with an absolute path — the client
@@ -125,7 +127,7 @@ sets its own working directory:
 ```
 
 Verify it end to end without restarting your agent, using the
-[`mcpt` CLI](https://github.com/f/mcp-tools) (`brew install f/mcptools/mcp`):
+[`mcpt` CLI](https://github.com/f/mcptools) (`brew install f/mcptools/mcp`):
 
 ```sh
 mcpt tools bun run src/index.ts
@@ -305,7 +307,7 @@ can share one database file without losing writes.
 
 ### `test/mcpt-loop.sh`
 
-Needs the [`mcpt` CLI](https://github.com/f/mcp-tools) on `PATH`, and exits 127 with an
+Needs the [`mcpt` CLI](https://github.com/f/mcptools) on `PATH`, and exits 127 with an
 install hint if it is missing (`brew install f/mcptools/mcp`). It is not part of
 `bun test` for that reason — run it before you ship.
 
