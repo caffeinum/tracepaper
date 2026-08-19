@@ -173,7 +173,6 @@ const toasts = el<HTMLDivElement>("toasts");
 const emptyState = el<HTMLDivElement>("empty");
 const commentList = el<HTMLDivElement>("comment-list");
 const statOpen = el<HTMLSpanElement>("stat-open");
-const conn = el<HTMLDivElement>("conn");
 const toolComment = el<HTMLButtonElement>("tool-comment");
 const toolComments = el<HTMLButtonElement>("tool-comments");
 const commentsBadge = el<HTMLSpanElement>("tool-comments-badge");
@@ -199,6 +198,8 @@ let interactiveFrameId: string | null = null;
 let selectedFrameId: string | null = null;
 let spaceHeld = false;
 let hasFitted = false;
+// ⌘0 alternates between framing the selection and the whole canvas; this holds which comes next.
+let cmd0FitsAll = false;
 
 function orderedFrames(): CanvasFrame[] {
   const list: CanvasFrame[] = [];
@@ -1014,7 +1015,11 @@ function setInteractive(frameId: string | null): void {
 }
 
 function setSelected(frameId: string | null): void {
+  const changed = frameId !== selectedFrameId;
   selectedFrameId = frameId;
+  // A new selection restarts the ⌘0 toggle at "fit this frame", so the first press after picking
+  // a frame always frames it rather than pulling back to the whole canvas.
+  if (changed) cmd0FitsAll = false;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-selected", id === frameId);
   writeFrameHash(frameId);
 }
@@ -1155,18 +1160,17 @@ function typingInField(): boolean {
 }
 
 window.addEventListener("keydown", (event) => {
+  // ⌘0 toggles between the selected frame and the whole canvas. With nothing selected there is
+  // nothing to toggle against, so it just fits everything.
   if ((event.metaKey || event.ctrlKey) && event.key === "0") {
     event.preventDefault();
-    if (selectedFrameId !== null) {
-      fitFrame(selectedFrameId);
+    if (selectedFrameId === null) {
+      zoomToFit();
       return;
     }
-    resetZoom();
-    return;
-  }
-  if ((event.metaKey || event.ctrlKey) && event.key === "1") {
-    event.preventDefault();
-    zoomToFit();
+    if (cmd0FitsAll) zoomToFit();
+    else fitFrame(selectedFrameId);
+    cmd0FitsAll = !cmd0FitsAll;
     return;
   }
   if (event.key === "Escape") {
@@ -1276,10 +1280,10 @@ async function loadAll(): Promise<void> {
   }
 }
 
-function setConn(state: "connecting" | "live" | "down"): void {
-  conn.dataset["state"] = state;
-  const label = conn.querySelector(".conn-label");
-  if (label) label.textContent = state === "live" ? "live" : state === "down" ? "reconnecting" : "connecting";
+function setConn(_state: "connecting" | "live" | "down"): void {
+  // Connection state is no longer surfaced in the chrome — the canvas either has the frames or it
+  // doesn't, and a blinking status dot only added noise. Kept as a no-op so the EventSource
+  // lifecycle wiring below stays untouched.
 }
 
 /**
