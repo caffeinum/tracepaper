@@ -94,6 +94,28 @@ port, so agent pushes land in the tab you already have open.
 
 stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
+## CLI (no MCP)
+
+If your agent's client can't run MCP, the same eight tools are on the command line. Every verb
+writes straight to the shared database as the agent — the same thing the MCP server does — so a
+frame or reply lands whether or not a canvas is open. A canvas the human already has open picks
+up the change on its next reconcile (~5s), the same lag the share tunnel has.
+
+```sh
+bunx github:caffeinum/tracepaper serve &            # once: hold a canvas open for the human
+bunx github:caffeinum/tracepaper push page.html --name "Pricing"   # or: … push - < page.html
+bunx github:caffeinum/tracepaper list
+bunx github:caffeinum/tracepaper comments --since cur_7            # read human feedback
+bunx github:caffeinum/tracepaper reply cmt_… "fixed — shipped it"
+bunx github:caffeinum/tracepaper resolve cmt_… --note "closed out"
+```
+
+`push` accepts a file, `-` for stdin, or `--html "<…>"`, plus `--name --width --height --x --y`
+and `--frame <id>` to replace an existing frame. `comments` takes `--since <cursor> --frame <id>
+--author human|agent --resolved`. Add `--json` to any verb for machine-readable output; on
+failure a verb prints one clean line to stderr and exits non-zero. `tracepaper help` lists them
+all. The frame is saved even with no server running — `serve` is only there so a human can watch.
+
 > **One canvas per machine, by default.** `~/.tracepaper/tracepaper.db` and port 4321 are global, so
 > two projects both wired with the config below share one canvas — project B's agent will call
 > `list_frames` and get project A's frames, and `push_html` with no `frameId` will land its work

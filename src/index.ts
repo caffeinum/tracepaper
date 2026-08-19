@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CLI_VERBS, runCli } from "./cli.ts";
 import { tolerateAbsentToolArguments } from "./compat.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { Bus } from "./events.ts";
@@ -77,6 +78,14 @@ async function ensureCanvasBundle(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // CLI verbs are one-shot clients over the shared db — they never start a server, build the
+  // bundle, or open a tunnel. Anything not a verb falls through to stdio / serve below.
+  const [verb, ...rest] = process.argv.slice(2);
+  const normalized = verb === "--help" || verb === "-h" ? "help" : verb;
+  if (normalized !== undefined && CLI_VERBS.has(normalized)) {
+    process.exit(await runCli(normalized, rest));
+  }
+
   const mode = parseMode(process.argv.slice(2));
   const config = loadConfig();
   await ensureCanvasBundle();
