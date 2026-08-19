@@ -1,0 +1,30 @@
+web/style.css
+  s_7adfa64874e58c::t_77a0ecea5fd46d 8-10,13-14
+  s_7adfa64874e58c::t_1784eebbaef764 788-796
+  s_7adfa64874e58c::t_b0dda0fc48428e 431-434,439-443
+  s_7adfa64874e58c::t_b263d45784fe3a 574-581,585
+  s_7adfa64874e58c::t_6f6b5213fde56e 506-507,509-510,512,514-531,534,539
+  s_7adfa64874e58c::t_132877896d43d2 50-51
+  s_7adfa64874e58c::t_b7f0998e70907d 807-808,816-819
+  s_7adfa64874e58c::t_af52e087863f5e 238-239,241-245
+web/canvas.ts
+  s_7adfa64874e58c::t_d5faacc5e30abc 278-283
+  s_7adfa64874e58c::t_17092b204749ae 1282-1285
+  s_7adfa64874e58c::t_8b9418ac63e69b 511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "643058d25182c7007da57bb36e95abff50de65f5",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
