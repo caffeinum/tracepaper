@@ -28,8 +28,9 @@
         <div id="comment-list" class="comment-list" role="list"></div>
 
         <footer class="sidebar-foot">
-          <kbd>c</kbd> comment <span class="sep">·</span> drag a title to move <span class="sep">·</span>
-          <kbd>⌘0</kbd> fit selected / all <span class="sep">·</span> <kbd>space</kbd> pan
+          <kbd>V</kbd> select <span class="sep">·</span> <kbd>S</kbd> pan <span class="sep">·</span> <kbd>C</kbd> comment
+          <span class="sep">·</span> <kbd>space</kbd> pan <span class="sep">·</span> <kbd>⌫</kbd> delete
+          <span class="sep">·</span> <kbd>⌘0</kbd> fit <span class="sep">·</span> <kbd>+</kbd>/<kbd>−</kbd> zoom
         </footer>
       </aside>
 
@@ -59,7 +60,15 @@
         </div>
 
         <div id="toolbar" class="toolbar">
-          <button id="tool-comment" class="tool" type="button" title="Comment mode (c)" aria-pressed="false">
+          <button id="tool-select" class="tool" type="button" title="Select (V)" aria-pressed="true">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3l11 6.5-4.7 1.2-1.2 4.7z" /></svg>
+            <span>Select</span>
+          </button>
+          <button id="tool-pan" class="tool" type="button" title="Hand · pan (S or H, or hold space)" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 9V4.6a1.1 1.1 0 012.2 0V8m0 0V3.6a1.1 1.1 0 012.2 0V8m0 0V4.6a1.1 1.1 0 012.2 0V9m0-1.4a1.1 1.1 0 012.2 0V12a5 5 0 01-5 5H10a5 5 0 01-4-2l-2-3a1.2 1.2 0 012-1.4L8 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Hand</span>
+          </button>
+          <button id="tool-comment" class="tool" type="button" title="Comment (C)" aria-pressed="false">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v9H9l-4 3v-3H4z" /></svg>
             <span>Comment</span>
           </button>

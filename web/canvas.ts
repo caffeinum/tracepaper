@@ -173,6 +173,8 @@ const toasts = el<HTMLDivElement>("toasts");
 const emptyState = el<HTMLDivElement>("empty");
 const commentList = el<HTMLDivElement>("comment-list");
 const statOpen = el<HTMLSpanElement>("stat-open");
+const toolSelect = el<HTMLButtonElement>("tool-select");
+const toolPan = el<HTMLButtonElement>("tool-pan");
 const toolComment = el<HTMLButtonElement>("tool-comment");
 const toolComments = el<HTMLButtonElement>("tool-comments");
 const commentsBadge = el<HTMLSpanElement>("tool-comments-badge");
@@ -194,7 +196,13 @@ const comments = new Map<string, CanvasComment>();
 
 const view = { x: 0, y: 0, scale: 1 };
 
-let mode: "idle" | "comment" = "idle";
+/**
+ * The active tool. "select" is the default (click to pick a frame, drag empty space to pan);
+ * "pan" is the hand tool (drag anywhere pans); "comment" drops pins. Holding space is a temporary
+ * pan from any tool. Escape returns to select.
+ */
+type Tool = "select" | "pan" | "comment";
+let tool: Tool = "select";
 let interactiveFrameId: string | null = null;
 let selectedFrameId: string | null = null;
 let spaceHeld = false;
@@ -437,16 +445,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   kill.type = "button";
   kill.title = "Delete frame";
   kill.textContent = "✕";
-  kill.addEventListener("click", () => {
-    if (!window.confirm(`Delete "${frame.name}" and its comments?`)) return;
-    api(`/api/frames/${frame.id}`, { method: "DELETE", headers: WRITE_HEADERS })
-      .then(() => {
-        dropFrame(frame.id);
-        closePanel();
-        renderAll();
-      })
-      .catch(fail);
-  });
+  kill.addEventListener("click", () => requestDeleteFrame(frame.id));
   label.append(name, dims, kill);
 
   const body = document.createElement("div");
@@ -460,19 +459,20 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   const catcher = document.createElement("div");
   catcher.className = "frame-catch";
   catcher.addEventListener("click", (event) => {
-    if (mode !== "comment") return;
+    if (tool !== "comment") return;
     const current = frames.get(frame.id);
     if (!current) throw new Error(`click on a frame that is no longer in state: ${frame.id}`);
     const point = screenToWorld(stagePoint(event));
     openComposer(current.id, point.x - current.x, point.y - current.y);
-    setMode("idle");
+    setTool("select");
   });
   catcher.addEventListener("click", () => {
-    if (mode === "comment") return;
+    // Only the select tool picks frames; the pan tool leaves selection alone, comment drops a pin.
+    if (tool !== "select") return;
     setSelected(frame.id);
   });
   catcher.addEventListener("dblclick", () => {
-    if (mode === "comment") return;
+    if (tool !== "select") return;
     setInteractive(frame.id);
   });
 
@@ -533,7 +533,9 @@ function renderFrames(): void {
 function makeDraggable(handle: HTMLElement, frameId: string): void {
   handle.classList.add("is-handle");
   handle.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || mode === "comment") return;
+    // Dragging a title moves the frame only with the select tool; otherwise let the press fall
+    // through to the stage so the pan/hand tool (or held space) pans instead.
+    if (event.button !== 0 || tool !== "select" || spaceHeld) return;
     const frame = frames.get(frameId);
     if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
     event.preventDefault();
@@ -998,9 +1000,11 @@ function renderAll(): void {
 
 // ---------------------------------------------------------------- modes
 
-function setMode(next: "idle" | "comment"): void {
-  mode = next;
-  stage.dataset["mode"] = next;
+function setTool(next: Tool): void {
+  tool = next;
+  stage.dataset["tool"] = next;
+  toolSelect.setAttribute("aria-pressed", String(next === "select"));
+  toolPan.setAttribute("aria-pressed", String(next === "pan"));
   toolComment.setAttribute("aria-pressed", String(next === "comment"));
   updateCursor();
 }
@@ -1056,11 +1060,17 @@ function applyFrameHash(animate = false): boolean {
 }
 
 function updateCursor(): void {
-  if (mode === "comment") {
-    stage.dataset["cursor"] = "comment";
+  // Space (or the pan tool) means a hand; a live drag shows the closed hand. Otherwise the tool
+  // decides: comment shows the pin, select shows the default arrow.
+  if (spaceHeld || tool === "pan") {
+    stage.dataset["cursor"] = panning ? "grabbing" : "grab";
     return;
   }
-  stage.dataset["cursor"] = panning ? "grabbing" : "grab";
+  if (panning) {
+    stage.dataset["cursor"] = "grabbing";
+    return;
+  }
+  stage.dataset["cursor"] = tool === "comment" ? "comment" : "select";
 }
 
 // ---------------------------------------------------------------- gestures
@@ -1088,8 +1098,14 @@ stage.addEventListener("pointerdown", (event) => {
   const middle = event.button === 1;
   const left = event.button === 0;
   if (!middle && !left) return;
-  if (left && mode === "comment" && onFrame) return;
-  if (left && !spaceHeld && onFrame && frameEl.dataset["frameId"] === interactiveFrameId) return;
+  // The pan tool and held space pan over anything, including frames. Otherwise a left press on a
+  // frame belongs to that frame: comment mode drops a pin, and an interactive frame keeps its own
+  // pointer events. A middle drag always pans.
+  const panOverride = middle || tool === "pan" || spaceHeld;
+  if (!panOverride) {
+    if (left && tool === "comment" && onFrame) return;
+    if (left && onFrame && frameEl.dataset["frameId"] === interactiveFrameId) return;
+  }
 
   pendingPan = true;
   panPointer = event.pointerId;
@@ -1152,12 +1168,35 @@ stage.addEventListener("pointerdown", (event) => {
   if (interactiveFrameId !== null && (!(frameEl instanceof HTMLElement) || frameEl.dataset["frameId"] !== interactiveFrameId)) {
     setInteractive(null);
   }
-  if (!(frameEl instanceof HTMLElement)) setSelected(null);
+  // Only the select tool clears the selection on an empty click — panning or commenting should
+  // leave the current selection (and its ⌘0 framing) intact.
+  if (tool === "select" && !spaceHeld && !(frameEl instanceof HTMLElement)) setSelected(null);
 });
 
 function typingInField(): boolean {
   const active = document.activeElement;
   return active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement;
+}
+
+/** Delete a frame and its comments, after a confirm. Shared by the ✕ button and the delete keys. */
+function requestDeleteFrame(frameId: string): void {
+  const frame = frames.get(frameId);
+  if (!frame) return;
+  if (!window.confirm(`Delete "${frame.name}" and its comments?`)) return;
+  api(`/api/frames/${frameId}`, { method: "DELETE", headers: WRITE_HEADERS })
+    .then(() => {
+      dropFrame(frameId);
+      if (selectedFrameId === frameId) setSelected(null);
+      if (interactiveFrameId === frameId) setInteractive(null);
+      closePanel();
+      renderAll();
+    })
+    .catch(fail);
+}
+
+function zoomAtCenter(factor: number): void {
+  const { width, height } = stageSize();
+  zoomAt({ x: width / 2, y: height / 2 }, factor);
 }
 
 window.addEventListener("keydown", (event) => {
@@ -1176,17 +1215,45 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") {
     if (panel) closePanel();
-    else if (mode === "comment") setMode("idle");
     else if (commentListOpen) setCommentList(false);
     else if (interactiveFrameId !== null) setInteractive(null);
+    else if (tool !== "select") setTool("select");
     else if (selectedFrameId !== null) setSelected(null);
     return;
   }
   if (typingInField() || event.metaKey || event.ctrlKey || event.altKey) return;
+  // Tools: V select · S/H hand (pan) · C comment.
+  if (event.key === "v" || event.key === "V") {
+    event.preventDefault();
+    setTool("select");
+    return;
+  }
+  if (event.key === "s" || event.key === "S" || event.key === "h" || event.key === "H") {
+    event.preventDefault();
+    setInteractive(null);
+    setTool("pan");
+    return;
+  }
   if (event.key === "c" || event.key === "C") {
     event.preventDefault();
     setInteractive(null);
-    setMode(mode === "comment" ? "idle" : "comment");
+    setTool(tool === "comment" ? "select" : "comment");
+    return;
+  }
+  if (event.key === "Backspace" || event.key === "Delete") {
+    if (selectedFrameId === null) return;
+    event.preventDefault();
+    requestDeleteFrame(selectedFrameId);
+    return;
+  }
+  if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    zoomAtCenter(1.25);
+    return;
+  }
+  if (event.key === "-" || event.key === "_") {
+    event.preventDefault();
+    zoomAtCenter(0.8);
     return;
   }
   if (event.key === "f" || event.key === "F") {
@@ -1201,24 +1268,36 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === " ") {
-    spaceHeld = true;
     event.preventDefault();
+    if (!spaceHeld) {
+      spaceHeld = true;
+      updateCursor();
+    }
   }
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === " ") spaceHeld = false;
+  if (event.key === " ") {
+    spaceHeld = false;
+    updateCursor();
+  }
 });
 
 window.addEventListener("blur", () => {
   spaceHeld = false;
+  updateCursor();
 });
 
 window.addEventListener("resize", () => positionPanel());
 
+toolSelect.addEventListener("click", () => setTool("select"));
+toolPan.addEventListener("click", () => {
+  setInteractive(null);
+  setTool("pan");
+});
 toolComment.addEventListener("click", () => {
   setInteractive(null);
-  setMode(mode === "comment" ? "idle" : "comment");
+  setTool(tool === "comment" ? "select" : "comment");
 });
 toolComments.addEventListener("click", () => toggleCommentList());
 sidebarClose.addEventListener("click", () => setCommentList(false));
@@ -1535,7 +1614,7 @@ window.addEventListener("error", (event) => {
   console.error("[canvas] uncaught", event.error);
 });
 
-setMode("idle");
+setTool("select");
 applyView();
 renderSidebar();
 zoomToFit();

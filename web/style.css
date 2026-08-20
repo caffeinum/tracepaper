@@ -488,19 +488,23 @@ code {
   cursor: default;
 }
 
-.stage[data-cursor="grab"] .viewport {
+/* The hand tool (and held space) grabs anywhere, frames included, so the cursor is set on the
+   frame overlay too — it is what the pointer is actually over on a frame. */
+.stage[data-cursor="grab"] .viewport,
+.stage[data-cursor="grab"] .frame-catch {
   cursor: grab;
 }
 
-.stage[data-cursor="grabbing"] .viewport {
+.stage[data-cursor="grabbing"] .viewport,
+.stage[data-cursor="grabbing"] .frame-catch {
   cursor: grabbing;
 }
 
 /* A teardrop pin cursor — the same shape as the pins it drops — so comment mode is legible without
    reading the toolbar, and the hotspot is the tip, where the pin will land. The overlay above each
-   iframe needs it too: it is what the pointer is actually over on a frame. */
-.stage[data-mode="comment"] .viewport,
-.stage[data-mode="comment"] .frame-catch {
+   iframe needs it too. */
+.stage[data-cursor="comment"] .viewport,
+.stage[data-cursor="comment"] .frame-catch {
   cursor:
     url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M10 25 C6 18 3 13 3 9 A7 7 0 1 1 17 9 C17 13 14 18 10 25 Z' fill='%23d94f2b' stroke='%23ffffff' stroke-width='1.6' stroke-linejoin='round'/%3E%3Ccircle cx='10' cy='9' r='2.6' fill='%23ffffff'/%3E%3C/svg%3E")
       10 25,
