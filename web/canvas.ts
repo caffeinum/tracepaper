@@ -1229,8 +1229,10 @@ stage.addEventListener("pointerdown", (event) => {
   pendingPan = true;
   panPointer = event.pointerId;
   panStart = { x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y };
-  // A middle-drag has no click semantics to protect, and its default is autoscroll.
-  if (middle) event.preventDefault();
+  // A pan gesture (hand tool, held space, or middle-drag) has no click semantics to protect, so
+  // suppress the default — otherwise the drag starts a text selection that highlights frame
+  // content as you pan. A select-tool drag is left alone so click-to-select still works.
+  if (panOverride) event.preventDefault();
 });
 
 stage.addEventListener("pointermove", (event) => {

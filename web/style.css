@@ -528,6 +528,14 @@ code {
   cursor: grab;
 }
 
+/* While a pan is possible or underway, nothing on the canvas is selectable — otherwise dragging
+   to pan drags out a text selection that highlights frame labels and content. */
+.stage[data-cursor="grab"],
+.stage[data-cursor="grabbing"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .stage[data-cursor="grabbing"] .viewport,
 .stage[data-cursor="grabbing"] .frame-catch {
   cursor: grabbing;
