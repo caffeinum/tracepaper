@@ -6,6 +6,10 @@
 
 An MCP server that gives an agent a canvas.
 
+<p align="center">
+  <img src="docs/canvas.png" width="900" alt="A tracepaper canvas: a blueprint grid, two frames outlined in hand-drawn lines with handwritten titles, a comment pin, and a handwritten note tying them together.">
+</p>
+
 The agent pushes HTML frames onto it. A human opens the canvas in a browser, scrolls
 around, and drops pinned comments on the frames. The agent reads those comments back
 through MCP and replies inside the thread. That round trip — **draw → comment → read
