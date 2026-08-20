@@ -5,9 +5,13 @@
   --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Handwriting face for frame titles and the wordmark — a drafting hand on the sheets.
+     System handwriting faces only, no bundled or remote font. */
+  --hand: "Bradley Hand", "Chalkboard SE", "Comic Sans MS", "Segoe Print", cursive;
 
   --ground: #f2f0ed;
   --grid: #d3cec7;
+  --grid-major: #cdc6bd;
   --surface: #fbfaf9;
   --surface-2: #f2f0ed;
   --sunken: #ebe8e3;
@@ -21,6 +25,11 @@
   --accent-ink: #ffffff;
   --accent-soft: rgba(217, 79, 43, 0.12);
   --accent-line: rgba(217, 79, 43, 0.42);
+
+  /* Hand-drawn frame outline: paper fills the wobbly interior so no grid bleeds through the edge,
+     ink strokes it. Selection recolors --sketch-ink to the accent (see .frame.is-selected). */
+  --sketch-paper: #fbfaf9;
+  --sketch-ink: #2c2823;
 
   --agent: #3d6b8f;
   --agent-soft: rgba(61, 107, 143, 0.12);
@@ -48,6 +57,7 @@
   :root:not([data-theme="light"]) {
     --ground: #131211;
     --grid: #2b2926;
+    --grid-major: #322e2a;
     --surface: #1c1a18;
     --surface-2: #232120;
     --sunken: #151413;
@@ -61,6 +71,9 @@
     --accent-ink: #16110f;
     --accent-soft: rgba(242, 96, 58, 0.16);
     --accent-line: rgba(242, 96, 58, 0.5);
+
+    --sketch-paper: #1c1a18;
+    --sketch-ink: #e0dacf;
 
     --agent: #7fb0d8;
     --agent-soft: rgba(127, 176, 216, 0.14);
@@ -78,6 +91,7 @@
 :root[data-theme="dark"] {
   --ground: #131211;
   --grid: #2b2926;
+  --grid-major: #322e2a;
   --surface: #1c1a18;
   --surface-2: #232120;
   --sunken: #151413;
@@ -91,6 +105,9 @@
   --accent-ink: #16110f;
   --accent-soft: rgba(242, 96, 58, 0.16);
   --accent-line: rgba(242, 96, 58, 0.5);
+
+  --sketch-paper: #1c1a18;
+  --sketch-ink: #e0dacf;
 
   --agent: #7fb0d8;
   --agent-soft: rgba(127, 176, 216, 0.14);
@@ -176,6 +193,14 @@ code {
   font-weight: 600;
   letter-spacing: -0.01em;
   user-select: none;
+}
+
+/* The wordmark is handwritten, echoing the frame titles — the app signs the sheet in the same hand. */
+.brand-name {
+  font-family: var(--hand);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .chip-sep {
@@ -479,11 +504,19 @@ code {
   background: var(--ground);
 }
 
+/* Blueprint hairline grid: fine cells plus a stronger line every fourth. Both scales and their
+   positions are driven from canvas.ts (applyView) so the paper stays registered to the world under
+   pan and zoom. Layer order matches the four background-size / -position values set there:
+   minor-V, minor-H, major-V, major-H. */
 .viewport {
   position: absolute;
   inset: 0;
   touch-action: none;
-  background-image: radial-gradient(var(--grid) 1px, transparent 1px);
+  background-image:
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid-major) 1px, transparent 1px);
   background-repeat: repeat;
   cursor: default;
 }
@@ -551,11 +584,13 @@ code {
   user-select: none;
 }
 
+/* Frame titles are handwritten — a drafting hand labelling the sheet. Normal case, kept legible. */
 .frame-name {
-  font-size: 11.5px;
+  font-family: var(--hand);
+  font-size: 15px;
   font-weight: 600;
   color: var(--ink-2);
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
 
 .frame-dims {
@@ -591,20 +626,72 @@ code {
   color: var(--accent);
 }
 
+/* The visible border is the hand-drawn stroke overlay (.frame-sketch), not a crisp CSS ring — the
+   body keeps a paper fill and a soft drop shadow for depth only. */
 .frame-body {
   position: relative;
   border-radius: 3px;
-  background: #fff;
-  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-1);
+  background: var(--sketch-paper);
+  box-shadow: var(--shadow-1);
+  /* Own stacking context so the sketch fill / ink / iframe / catcher / pins layer predictably. */
+  isolation: isolate;
 }
 
-.frame.is-selected .frame-body {
-  box-shadow: 0 0 0 2px var(--accent-line), var(--shadow-2);
+/* Selected / interactive recolours the hand-drawn stroke to the accent by overriding --sketch-ink,
+   which the ink paths read via CSS (so state wins over the SVG's own attributes). */
+.frame.is-selected {
+  --sketch-ink: var(--accent);
 }
 
-/* Interactive is a stronger state than selected, so it wins the outline. */
+/* Interactive is a stronger state than selected; it also lifts the paper. */
+.frame.is-interactive {
+  --sketch-ink: var(--accent);
+}
+
 .frame.is-interactive .frame-body {
-  box-shadow: 0 0 0 2px var(--accent), var(--shadow-2);
+  box-shadow: var(--shadow-2);
+}
+
+/* Hand-drawn frame outline. The fill pass sits behind the iframe (paper backing, no stroke); the
+   ink passes sit above it and carry the visible edge. All are non-interactive and overflow so an
+   outward wobble peak is not clipped. */
+.frame-sketch-fill,
+.frame-sketch {
+  position: absolute;
+  /* Offset by the viewBox padding so path coordinate (0,0) lands on the body's top-left corner. */
+  left: -8px;
+  top: -8px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.frame-sketch-fill {
+  z-index: 0;
+}
+
+.frame-sketch {
+  z-index: 2;
+}
+
+.frame-sketch-fill path {
+  fill: var(--sketch-paper);
+  stroke: none;
+}
+
+.frame-sketch path {
+  fill: none;
+  stroke: var(--sketch-ink);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.frame-sketch .ink-1 {
+  stroke-width: 1.8px;
+}
+
+.frame-sketch .ink-2 {
+  stroke-width: 1.1px;
+  opacity: 0.5;
 }
 
 .frame.is-selected .frame-name {
@@ -613,6 +700,8 @@ code {
 
 .frame iframe {
   display: block;
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   border: 0;
@@ -620,10 +709,11 @@ code {
   background: #fff;
 }
 
-/* transparent capture layer above the iframe */
+/* transparent capture layer above the iframe and the sketch stroke */
 .frame-catch {
   position: absolute;
   inset: 0;
+  z-index: 3;
   pointer-events: auto;
 }
 
@@ -661,6 +751,7 @@ code {
 .pins {
   position: absolute;
   inset: 0;
+  z-index: 4;
   pointer-events: none;
 }
 

@@ -286,8 +286,12 @@ function applyView(): void {
   let cell = GRID * view.scale;
   while (cell < 14) cell *= 4;
   while (cell > 96) cell /= 4;
-  viewport.style.backgroundSize = `${cell}px ${cell}px`;
-  viewport.style.backgroundPosition = `${view.x}px ${view.y}px`;
+  const major = cell * 4;
+  // Four blueprint layers (minor-V, minor-H, major-V, major-H) share one origin so the grid stays
+  // registered to the world under pan and zoom.
+  const origin = `${view.x}px ${view.y}px`;
+  viewport.style.backgroundSize = `${cell}px ${cell}px, ${cell}px ${cell}px, ${major}px ${major}px, ${major}px ${major}px`;
+  viewport.style.backgroundPosition = `${origin}, ${origin}, ${origin}, ${origin}`;
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
   positionPanel();
@@ -416,6 +420,83 @@ function fail(error: unknown): void {
 
 // ---------------------------------------------------------------- frames
 
+// ---- hand-drawn frame outlines --------------------------------------------
+// Each frame wears a wobbly outline drawn as a real SVG <path> — the wobble is baked into the
+// coordinates (rough.js style: two overlapping jittered strokes), not a filter, so it renders the
+// same everywhere and reads clearly at any zoom. A paper-filled pass behind the iframe covers any
+// grid that would otherwise show through the ragged edge; the stroke passes sit on top.
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+// Padding around the body so an outward wobble peak has room in the SVG viewBox.
+const SKETCH_PAD = 8;
+// Calm amplitude — the user rejected rougher edges.
+const SKETCH_AMP = 2;
+
+/** Deterministic PRNG so a given seed always draws the same wobble. */
+function sketchRng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+/** A closed path tracing a w×h rectangle, each perimeter sample nudged by ±amp. */
+function roughRectPath(w: number, h: number, amp: number, seed: number): string {
+  const r = sketchRng(seed);
+  const j = (): number => (r() * 2 - 1) * amp;
+  const pts: Array<[number, number]> = [];
+  const step = 26;
+  for (let x = 0; x <= w; x += step) pts.push([x + j(), j()]);
+  for (let y = step; y <= h; y += step) pts.push([w + j(), y + j()]);
+  for (let x = w - step; x >= 0; x -= step) pts.push([x + j(), h + j()]);
+  for (let y = h - step; y >= step; y -= step) pts.push([j(), y + j()]);
+  return "M" + pts.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ") + " Z";
+}
+
+/** Stable 32-bit hash of a frame id, so a frame's wobble never reshuffles between renders. */
+function hashId(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function makeSvg(cls: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", cls);
+  return svg;
+}
+
+function makePath(): SVGPathElement {
+  return document.createElementNS(SVG_NS, "path");
+}
+
+/** (Re)draw a frame's outline for its current size. Seed is derived from the id, so the shape is
+ *  stable across redraws and only changes when width/height change. */
+function paintSketch(node: FrameNode, w: number, h: number): void {
+  const seed = node.sketchSeed;
+  const p1 = roughRectPath(w, h, SKETCH_AMP, seed);
+  const p2 = roughRectPath(w, h, SKETCH_AMP, seed + 101);
+  const vw = w + SKETCH_PAD * 2;
+  const vh = h + SKETCH_PAD * 2;
+  const viewBox = `${-SKETCH_PAD} ${-SKETCH_PAD} ${vw} ${vh}`;
+  for (const svg of [node.sketchFill, node.sketch]) {
+    svg.setAttribute("width", String(vw));
+    svg.setAttribute("height", String(vh));
+    svg.setAttribute("viewBox", viewBox);
+  }
+  // Behind the iframe: paper fills the wobbly interior so no grid bleeds through the ragged edge.
+  node.sketchFillPath.setAttribute("d", p1);
+  // On top: the visible hand-drawn edge — one firm pass plus a fainter overlapping pass.
+  node.sketchInk1.setAttribute("d", p1);
+  node.sketchInk2.setAttribute("d", p2);
+  node.sketchW = w;
+  node.sketchH = h;
+}
+
 type FrameNode = {
   root: HTMLDivElement;
   name: HTMLSpanElement;
@@ -424,6 +505,14 @@ type FrameNode = {
   iframe: HTMLIFrameElement;
   pins: HTMLDivElement;
   version: number;
+  sketchSeed: number;
+  sketchFill: SVGSVGElement;
+  sketch: SVGSVGElement;
+  sketchFillPath: SVGPathElement;
+  sketchInk1: SVGPathElement;
+  sketchInk2: SVGPathElement;
+  sketchW: number;
+  sketchH: number;
 };
 
 const frameNodes = new Map<string, FrameNode>();
@@ -476,6 +565,20 @@ function buildFrame(frame: CanvasFrame): FrameNode {
     setInteractive(frame.id);
   });
 
+  // Two SVG passes for the hand-drawn edge. The fill pass sits behind the iframe (paper backing so
+  // the ragged edge shows no grid); the ink pass sits above it. Stroke colour comes from CSS
+  // (--sketch-ink) so selection/interactive state can recolour it to the accent.
+  const sketchFill = makeSvg("frame-sketch-fill");
+  const sketchFillPath = makePath();
+  sketchFill.appendChild(sketchFillPath);
+
+  const sketch = makeSvg("frame-sketch");
+  const sketchInk1 = makePath();
+  sketchInk1.setAttribute("class", "ink-1");
+  const sketchInk2 = makePath();
+  sketchInk2.setAttribute("class", "ink-2");
+  sketch.append(sketchInk1, sketchInk2);
+
   const pins = document.createElement("div");
   pins.className = "pins";
 
@@ -488,9 +591,18 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   hint.textContent = "interactive — click here or press esc to leave";
   hint.addEventListener("click", () => setInteractive(null));
 
-  body.append(iframe, catcher, pins);
+  // sketchFill behind the iframe (paper), sketch (ink) above it; catcher and pins keep their order
+  // above so clicks and pins stay on top. The sketch SVGs are pointer-events:none via CSS.
+  body.append(sketchFill, iframe, sketch, catcher, pins);
   root.append(label, body, hint);
-  return { root, name, dims, body, iframe, pins, version: -1 };
+  const node: FrameNode = {
+    root, name, dims, body, iframe, pins, version: -1,
+    sketchSeed: hashId(frame.id),
+    sketchFill, sketch, sketchFillPath, sketchInk1, sketchInk2,
+    sketchW: -1, sketchH: -1,
+  };
+  paintSketch(node, frame.width, frame.height);
+  return node;
 }
 
 function renderFrames(): void {
@@ -506,6 +618,10 @@ function renderFrames(): void {
     node.root.style.transform = `translate(${frame.x}px, ${frame.y}px)`;
     node.body.style.width = `${frame.width}px`;
     node.body.style.height = `${frame.height}px`;
+    // The wobbly outline is baked for a specific size, so redraw it only when the size changes.
+    if (node.sketchW !== frame.width || node.sketchH !== frame.height) {
+      paintSketch(node, frame.width, frame.height);
+    }
     node.name.textContent = frame.name;
     node.dims.textContent = `${Math.round(frame.width)} × ${Math.round(frame.height)}`;
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
