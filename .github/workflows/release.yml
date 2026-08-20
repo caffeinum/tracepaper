@@ -34,6 +34,10 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      # OIDC trusted publishing needs npm >= 11.5.1; Node 22 still ships npm 10, which silently
+      # falls back to token auth (ENEEDAUTH) even when trusted publishing is configured.
+      - run: npm install -g npm@latest
+
       - run: bun install --frozen-lockfile
 
       - name: the tag must match the version being published
