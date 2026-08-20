@@ -631,7 +631,11 @@ code {
 .frame-body {
   position: relative;
   border-radius: 3px;
-  background: var(--sketch-paper);
+  /* No rectangular fill — the paper comes from the wobble-shaped sketch fill below, so nothing
+     square pokes past the hand-drawn edge at an inward dent. A soft box-shadow gives depth: it is
+     safe next to the iframe (a CSS `filter` here is NOT — it blanks the cross-origin iframe), and
+     shadow-1 is soft enough that its rectangle reads as a shadow, not an edge, behind the wobble. */
+  background: transparent;
   box-shadow: var(--shadow-1);
   /* Own stacking context so the sketch fill / ink / iframe / catcher / pins layer predictably. */
   isolation: isolate;
@@ -689,9 +693,10 @@ code {
   stroke-width: 1.8px;
 }
 
+/* One firm hand-drawn line reads cleaner than two — the second pass diverged into a visible
+   parallel line. Kept in the DOM (harmless) but not drawn. */
 .frame-sketch .ink-2 {
-  stroke-width: 1.1px;
-  opacity: 0.5;
+  display: none;
 }
 
 .frame.is-selected .frame-name {
