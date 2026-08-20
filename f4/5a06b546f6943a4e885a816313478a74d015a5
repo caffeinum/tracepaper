@@ -1,0 +1,22 @@
+.github/workflows/ci.yml
+  s_7adfa64874e58c::t_500fc2a63daf4b 6,8-13
+  s_7adfa64874e58c::t_6b9bf0e3db230b 73-123
+README.md
+  s_7adfa64874e58c::t_5d1e111946ac10 359-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f45a06b546f6943a4e885a816313478a74d015a5",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
