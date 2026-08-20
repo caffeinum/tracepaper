@@ -356,12 +356,12 @@ npm version patch      # bumps package.json and writes a v* tag
 git push --follow-tags
 ```
 
-The `release` workflow then runs the gate, builds the bundle, checks the tag matches
-`package.json`, and publishes with npm [provenance](https://docs.npmjs.com/generating-provenance-statements).
-It uses npm trusted publishing (OIDC) — configure this repo + the `release` workflow as a
-trusted publisher on npmjs.com and no `NPM_TOKEN` secret is needed; set one as a fallback if
-you would rather. `workflow_dispatch` runs the same steps as a dry-run `npm pack` without
-publishing.
+Pushing the tag runs the `ci` workflow's `publish` job: after the gate passes it builds the
+bundle, checks the tag matches `package.json`, and publishes with npm
+[provenance](https://docs.npmjs.com/generating-provenance-statements). It authenticates with npm
+trusted publishing (OIDC), so no `NPM_TOKEN` secret is needed — configure this repo and the
+`ci.yml` workflow as a trusted publisher on npmjs.com (the runner upgrades npm to a version that
+supports OIDC). `workflow_dispatch` runs the same steps as a dry-run `npm pack` without publishing.
 
 ## License
 
