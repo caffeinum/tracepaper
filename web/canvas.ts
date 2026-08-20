@@ -493,6 +493,9 @@ function paintSketch(node: FrameNode, w: number, h: number): void {
   // On top: the visible hand-drawn edge — one firm pass plus a fainter overlapping pass.
   node.sketchInk1.setAttribute("d", p1);
   node.sketchInk2.setAttribute("d", p2);
+  // Clip the iframe to the same wobbly outline so its straight edges never poke past the drawn
+  // line at an inward dent (most visible in dark mode, where the white frame contrasts the ground).
+  node.iframe.style.clipPath = `path('${p1}')`;
   node.sketchW = w;
   node.sketchH = h;
 }
