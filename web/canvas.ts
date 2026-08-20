@@ -184,6 +184,7 @@ const toolShareLabel = el<HTMLSpanElement>("tool-share-label");
 const sharePanel = el<HTMLElement>("share");
 const shareBody = el<HTMLDivElement>("share-body");
 const shareClose = el<HTMLButtonElement>("share-close");
+const themeToggle = el<HTMLButtonElement>("theme-toggle");
 
 // ---------------------------------------------------------------- state
 
@@ -1231,6 +1232,44 @@ el<HTMLButtonElement>("tool-zoom-out").addEventListener("click", () => {
 });
 toolZoomLevel.addEventListener("click", () => resetZoom());
 el<HTMLButtonElement>("tool-fit").addEventListener("click", () => zoomToFit());
+
+// ---------------------------------------------------------------- theme
+
+/**
+ * Three states, cycled by the chip button: "system" follows prefers-color-scheme (the default),
+ * "light" and "dark" force it. The choice rides in localStorage; the CSS reacts to data-theme on
+ * <html> (absent = system). See the dark-palette selectors in style.css.
+ */
+type Theme = "system" | "light" | "dark";
+const THEME_KEY = "tracepaper-theme";
+const THEME_ORDER: Theme[] = ["system", "light", "dark"];
+const THEME_ICON: Record<Theme, string> = {
+  // system: half-filled disc · light: sun · dark: moon
+  system: `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 0 0 0 14V3Z" fill="currentColor"/><circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`,
+  light: `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4"/></g></svg>`,
+  dark: `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M14 11.5A5.5 5.5 0 0 1 8.5 6c0-1 .27-1.94.74-2.75A6 6 0 1 0 16.75 10.76 5.48 5.48 0 0 1 14 11.5Z" fill="currentColor"/></svg>`,
+};
+
+function readTheme(): Theme {
+  const stored = localStorage.getItem(THEME_KEY);
+  return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+}
+
+function applyTheme(theme: Theme): void {
+  if (theme === "system") delete document.documentElement.dataset["theme"];
+  else document.documentElement.dataset["theme"] = theme;
+  themeToggle.innerHTML = THEME_ICON[theme];
+  themeToggle.title = `Theme: ${theme}`;
+}
+
+let currentTheme = readTheme();
+applyTheme(currentTheme);
+themeToggle.addEventListener("click", () => {
+  currentTheme = THEME_ORDER[(THEME_ORDER.indexOf(currentTheme) + 1) % THEME_ORDER.length]!;
+  if (currentTheme === "system") localStorage.removeItem(THEME_KEY);
+  else localStorage.setItem(THEME_KEY, currentTheme);
+  applyTheme(currentTheme);
+});
 
 // ---------------------------------------------------------------- empty state
 

@@ -40,8 +40,12 @@
   --r-l: 14px;
 }
 
+/* Dark palette. The base :root above is light, so dark applies in two cases: the system prefers
+   dark AND the user has not forced light (the default, follow-the-system path), or the user has
+   explicitly chosen dark via the toggle (data-theme="dark"), which wins over the system either way.
+   The two selectors carry the same declarations — CSS has no mixins, so they are spelled out twice. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ground: #131211;
     --grid: #2b2926;
     --surface: #1c1a18;
@@ -69,6 +73,35 @@
     --surface-float: rgba(28, 26, 24, 0.84);
     --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 36px rgba(0, 0, 0, 0.5);
   }
+}
+
+:root[data-theme="dark"] {
+  --ground: #131211;
+  --grid: #2b2926;
+  --surface: #1c1a18;
+  --surface-2: #232120;
+  --sunken: #151413;
+  --line: #2e2b28;
+  --line-strong: #403c37;
+  --ink: #eeebe6;
+  --ink-2: #a8a29a;
+  --ink-3: #776f66;
+
+  --accent: #f2603a;
+  --accent-ink: #16110f;
+  --accent-soft: rgba(242, 96, 58, 0.16);
+  --accent-line: rgba(242, 96, 58, 0.5);
+
+  --agent: #7fb0d8;
+  --agent-soft: rgba(127, 176, 216, 0.14);
+  --done: #93b57f;
+  --done-soft: rgba(147, 181, 127, 0.14);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 18px 48px rgba(0, 0, 0, 0.55);
+
+  --surface-float: rgba(28, 26, 24, 0.84);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 36px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -241,6 +274,31 @@ code {
 .brand-dim {
   color: var(--ink-3);
   font-weight: 500;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px -2px 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.theme-toggle svg {
+  width: 14px;
+  height: 14px;
 }
 
 .conn {
