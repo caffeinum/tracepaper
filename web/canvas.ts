@@ -1341,6 +1341,24 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (typingInField() || event.metaKey || event.ctrlKey || event.altKey) return;
+  // Figma-style zoom shortcuts on the number row. Matched by physical key (event.code) since
+  // shift turns the digits into symbols. ⇧1 fit all · ⇧2 fit selection · ⇧0 reset to 100%.
+  if (event.shiftKey && event.code === "Digit1") {
+    event.preventDefault();
+    zoomToFit();
+    return;
+  }
+  if (event.shiftKey && event.code === "Digit2") {
+    event.preventDefault();
+    if (selectedFrameId !== null) fitFrame(selectedFrameId);
+    else zoomToFit();
+    return;
+  }
+  if (event.shiftKey && event.code === "Digit0") {
+    event.preventDefault();
+    resetZoom();
+    return;
+  }
   // Tools: V select · S/H hand (pan) · C comment.
   if (event.key === "v" || event.key === "V") {
     event.preventDefault();
