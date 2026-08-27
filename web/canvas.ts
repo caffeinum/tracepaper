@@ -1280,6 +1280,21 @@ viewport.addEventListener(
   { passive: false },
 );
 
+// A trackpad pinch (ctrl+wheel) must zoom the CANVAS, never the browser page — even when the
+// pointer is over the toolbar, the chip, or the sidebar rather than the viewport. Caught at the
+// window in the capture phase so it beats every other handler and the page can never zoom out from
+// under the canvas (which blows up the grid and constant-size labels and pushes the toolbar off).
+window.addEventListener(
+  "wheel",
+  (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    zoomAt(stagePoint(event), clamp(Math.exp(-event.deltaY * 0.01), 0.5, 2));
+  },
+  { passive: false, capture: true },
+);
+
 stage.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -1321,6 +1336,19 @@ function zoomAtCenter(factor: number): void {
 }
 
 window.addEventListener("keydown", (event) => {
+  // ⌘+ / ⌘- zoom the CANVAS, not the browser page — otherwise the page zoom blows up the grid and
+  // labels and hides the toolbar. (⌘0 below is the canvas fit toggle, so it already blocks the
+  // browser's reset-zoom; with page zoom fully intercepted here, there is nothing to reset.)
+  if ((event.metaKey || event.ctrlKey) && (event.key === "=" || event.key === "+")) {
+    event.preventDefault();
+    zoomAtCenter(1.25);
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && (event.key === "-" || event.key === "_")) {
+    event.preventDefault();
+    zoomAtCenter(0.8);
+    return;
+  }
   // ⌘0 toggles between the selected frame and the whole canvas. With nothing selected there is
   // nothing to toggle against, so it just fits everything.
   if ((event.metaKey || event.ctrlKey) && event.key === "0") {
