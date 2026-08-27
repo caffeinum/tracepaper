@@ -707,6 +707,20 @@ describe("frames never overlap", () => {
     s.close();
   });
 
+  test("tidyFrames re-packs only the given repo and leaves other canvases alone", () => {
+    const s = store();
+    s.createFrame({ html: "<p>a</p>", name: "a1", repo: "alpha", x: 0, y: 0, width: 900, height: 700 });
+    s.createFrame({ html: "<p>b</p>", name: "a2", repo: "alpha", x: 0, y: 0, width: 900, height: 700 });
+    const beta = s.createFrame({ html: "<p>c</p>", name: "b1", repo: "beta", x: 500, y: 500 });
+
+    const tidied = s.tidyFrames("alpha");
+    expect(tidied.map((f) => f.name).sort()).toEqual(["a1", "a2"]);
+    // Beta was untouched — its hand-set position stands.
+    expect(s.getFrame(beta.id).x).toBe(500);
+    expect(s.getFrame(beta.id).y).toBe(500);
+    s.close();
+  });
+
   test("tidyFrames untangles a canvas that is already a pile", () => {
     const s = store();
     // Deliberately stack everything at the origin, as the reported canvas had.
@@ -715,11 +729,112 @@ describe("frames never overlap", () => {
     }
     expect(overlapping(s).length).toBeGreaterThan(0);
 
-    const tidied = s.tidyFrames();
+    const tidied = s.tidyFrames("default");
     expect(tidied).toHaveLength(8);
     expect(overlapping(s)).toEqual([]);
     // It moves frames only — nothing is lost.
     expect(s.counts().frames).toBe(8);
     s.close();
+  });
+});
+
+describe("repo scoping", () => {
+  test("frames default to the 'default' repo and carry createdBy", () => {
+    const s = store();
+    const bare = s.createFrame({ html: "<p>x</p>" });
+    expect(bare.repo).toBe("default");
+    expect(bare.createdBy).toBe(null);
+
+    const scoped = s.createFrame({ html: "<p>y</p>", repo: "acme/app", createdBy: "acme/writer" });
+    expect(scoped.repo).toBe("acme/app");
+    expect(scoped.createdBy).toBe("acme/writer");
+    expect(s.getFrame(scoped.id).createdBy).toBe("acme/writer");
+    s.close();
+  });
+
+  test("listFrames(repo) isolates canvases; omitting repo returns all", () => {
+    const s = store();
+    const a1 = s.createFrame({ html: "<p>a</p>", repo: "alpha" });
+    const a2 = s.createFrame({ html: "<p>a2</p>", repo: "alpha" });
+    const b1 = s.createFrame({ html: "<p>b</p>", repo: "beta" });
+
+    expect(s.listFrames("alpha").map((f) => f.id).sort()).toEqual([a1.id, a2.id].sort());
+    expect(s.listFrames("beta").map((f) => f.id)).toEqual([b1.id]);
+    expect(s.listFrames().map((f) => f.id).sort()).toEqual([a1.id, a2.id, b1.id].sort());
+    expect(s.listFrames("nope")).toEqual([]);
+    s.close();
+  });
+
+  test("auto-placement is per-repo: two canvases both start at the origin", () => {
+    const s = store();
+    // Fill alpha's first row so its next frame would wrap — beta must be unaffected.
+    const a1 = s.createFrame({ html: "<p>a1</p>", repo: "alpha" });
+    const a2 = s.createFrame({ html: "<p>a2</p>", repo: "alpha" });
+    const b1 = s.createFrame({ html: "<p>b1</p>", repo: "beta" });
+
+    expect([a1.x, a1.y]).toEqual([0, 0]);
+    expect(a2.x).toBeGreaterThan(a1.x); // placed relative to alpha only
+    // Beta lays out independently and reuses the origin.
+    expect([b1.x, b1.y]).toEqual([0, 0]);
+    s.close();
+  });
+
+  test("listComments filters by the frame's repo via the join", () => {
+    const s = store();
+    const a = s.createFrame({ html: "<p>a</p>", repo: "alpha" });
+    const b = s.createFrame({ html: "<p>b</p>", repo: "beta" });
+    const ca = s.createComment({ frameId: a.id, x: 1, y: 1, text: "on alpha" });
+    const cb = s.createComment({ frameId: b.id, x: 1, y: 1, text: "on beta" });
+
+    expect(s.listComments({ repo: "alpha" }).map((c) => c.id)).toEqual([ca.id]);
+    expect(s.listComments({ repo: "beta" }).map((c) => c.id)).toEqual([cb.id]);
+    // repo composes with the other filters and cursors keep working.
+    expect(s.listComments({ repo: "alpha", frameId: a.id }).map((c) => c.id)).toEqual([ca.id]);
+    expect(s.listComments({}).map((c) => c.id).sort()).toEqual([ca.id, cb.id].sort());
+    s.close();
+  });
+
+  test("listRepos counts frames and reports the latest update per canvas", () => {
+    const s = store();
+    s.createFrame({ html: "<p>a</p>", repo: "alpha" });
+    s.createFrame({ html: "<p>a2</p>", repo: "alpha" });
+    s.createFrame({ html: "<p>b</p>", repo: "beta" });
+
+    const repos = s.listRepos();
+    const byName = new Map(repos.map((r) => [r.repo, r]));
+    expect(byName.get("alpha")?.frameCount).toBe(2);
+    expect(byName.get("beta")?.frameCount).toBe(1);
+    expect(byName.get("alpha")?.updatedAt).not.toBe(null);
+    s.close();
+  });
+});
+
+describe("migration from a pre-repo db", () => {
+  test("opening an old db with no repo column backfills 'default'", () => {
+    const path = `${import.meta.dir}/../.tmp-migrate-test-${Date.now()}.db`;
+    try {
+      // Build a legacy frames table exactly as an older build wrote it — no repo/createdBy.
+      const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
+      const old = new Database(path, { create: true });
+      old.exec(`CREATE TABLE frames (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, html TEXT NOT NULL,
+        width REAL NOT NULL, height REAL NOT NULL, x REAL NOT NULL, y REAL NOT NULL,
+        version INTEGER NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+      )`);
+      old.query(
+        `INSERT INTO frames (id, name, html, width, height, x, y, version, createdAt, updatedAt)
+         VALUES ('frm_0123456789ab', 'Legacy', '<p>old</p>', 1280, 900, 0, 0, 1, '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`,
+      ).run();
+      old.close();
+
+      const s = new Store(path);
+      const frame = s.getFrame("frm_0123456789ab");
+      expect(frame.repo).toBe("default");
+      expect(frame.createdBy).toBe(null);
+      expect(s.listFrames("default").map((f) => f.id)).toEqual(["frm_0123456789ab"]);
+      s.close();
+    } finally {
+      for (const suffix of ["", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
+    }
   });
 });

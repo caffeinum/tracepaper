@@ -25,6 +25,10 @@ export const FrameSchema = z.object({
   x: z.number(),
   y: z.number(),
   version: z.number().int(),
+  /** The repo / canvas this frame belongs to. */
+  repo: z.string(),
+  /** Who wrote the frame — the writing connection's own repo. Null on pre-repo frames. */
+  createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -64,6 +68,10 @@ export const CreateFrameInputSchema = z.object({
   height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
   x: z.number().optional(),
   y: z.number().optional(),
+  /** Which repo / canvas the frame lands on. The MCP layer always resolves and passes this. */
+  repo: z.string().min(1).default("default"),
+  /** The writing connection's own repo, recorded even on a cross-repo write. */
+  createdBy: z.string().min(1).optional(),
 });
 export type CreateFrameInput = z.input<typeof CreateFrameInputSchema>;
 
@@ -88,6 +96,8 @@ export const CommentFilterSchema = z.object({
   since: z.string().optional(),
   includeResolved: z.boolean().optional(),
   author: AuthorSchema.optional(),
+  /** Scope to comments whose frame is in this repo (joined against frames.repo). */
+  repo: z.string().optional(),
 });
 export type CommentFilter = z.infer<typeof CommentFilterSchema>;
 
@@ -102,6 +112,7 @@ export const pushHtmlShape = {
   height: z.number().positive().optional().describe(`Frame height in css px (default ${DEFAULT_FRAME_HEIGHT}). Resizes the frame when passed with frameId.`),
   x: z.number().optional().describe("Canvas position in world px. Omit to auto-place. Use it to group related frames: a variant belongs beside its original, a new topic starts a new row."),
   y: z.number().optional().describe("Canvas position in world px. Frames on the same y read as one row; step y down by the row's height plus ~120 to start a new row."),
+  repo: z.string().min(1).optional().describe("Which repo/canvas to draw on. Defaults to this connection's repo (git remote / TRACEPAPER_REPO / folder). Pass it to draw on another canvas; find canvas names with list_canvases."),
 };
 export const PushHtmlInputSchema = z.object(pushHtmlShape);
 export type PushHtmlInput = z.infer<typeof PushHtmlInputSchema>;
@@ -111,13 +122,20 @@ export const getCommentsShape = {
   since: z.string().optional().describe("ISO timestamp or comment id; returns everything strictly after it."),
   includeResolved: z.boolean().default(false),
   author: AuthorSchema.optional(),
+  repo: z.string().min(1).optional().describe("Which repo/canvas to read feedback from. Defaults to this connection's repo."),
 };
 export const GetCommentsInputSchema = z.object(getCommentsShape);
 export type GetCommentsInput = z.infer<typeof GetCommentsInputSchema>;
 
-export const listFramesShape = {};
+export const listFramesShape = {
+  repo: z.string().min(1).optional().describe(`Which repo/canvas to list. Defaults to this connection's repo; pass "*" for every canvas.`),
+};
 export const ListFramesInputSchema = z.object(listFramesShape);
 export type ListFramesInput = z.infer<typeof ListFramesInputSchema>;
+
+export const listCanvasesShape = {};
+export const ListCanvasesInputSchema = z.object(listCanvasesShape);
+export type ListCanvasesInput = z.infer<typeof ListCanvasesInputSchema>;
 
 export const resolveCommentShape = {
   commentId: z.string(),
@@ -176,10 +194,29 @@ export const ListFramesResultSchema = z.object({
 });
 export type ListFramesResult = z.infer<typeof ListFramesResultSchema>;
 
+export const RepoSummarySchema = z.object({
+  repo: z.string(),
+  frameCount: z.number().int(),
+  updatedAt: z.string().nullable(),
+});
+export type RepoSummary = z.infer<typeof RepoSummarySchema>;
+
+export const ListCanvasesResultSchema = z.object({
+  canvases: z.array(RepoSummarySchema),
+  canvasUrl: z.string(),
+});
+export type ListCanvasesResult = z.infer<typeof ListCanvasesResultSchema>;
+
 // ---------- HTTP request bodies ----------
 
-/** POST /api/frames — same shape as push_html. */
-export const CreateOrUpdateFrameBodySchema = PushHtmlInputSchema;
+/**
+ * POST /api/frames — push_html's shape plus createdBy. The HTTP layer has no per-connection
+ * identity, so repo/createdBy come from the body (the CLI maps --repo here); repo defaults to
+ * 'default' at the store when absent.
+ */
+export const CreateOrUpdateFrameBodySchema = PushHtmlInputSchema.extend({
+  createdBy: z.string().min(1).optional(),
+});
 export type CreateOrUpdateFrameBody = z.infer<typeof CreateOrUpdateFrameBodySchema>;
 
 /**
@@ -225,6 +262,7 @@ export const ListCommentsQuerySchema = z.object({
   since: z.string().optional(),
   includeResolved: queryBool.optional(),
   author: AuthorSchema.optional(),
+  repo: z.string().optional(),
 });
 export type ListCommentsQuery = z.infer<typeof ListCommentsQuerySchema>;
 

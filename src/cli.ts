@@ -13,8 +13,19 @@
 import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
+import { resolveRepo } from "./repo.ts";
 import { Store } from "./store.ts";
 import type { Comment } from "./types.ts";
+
+/** The connection's own repo, resolved from cwd/env — the writer identity, like an stdio agent. */
+function ownRepo(): string {
+  return resolveRepo(process.env, process.cwd());
+}
+
+/** `--repo <x>` if given, else the CLI's own resolved repo — so a run is scoped like an agent. */
+function repoFlag(flags: Flags): string {
+  return typeof flags["repo"] === "string" ? flags["repo"] : ownRepo();
+}
 
 /** The verbs the CLI owns. Anything not here falls through to stdio / serve in index.ts. */
 export const CLI_VERBS = new Set([
@@ -137,9 +148,12 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
         const name = nameFor(flags);
         const width = num(flags, "width");
         const height = num(flags, "height");
+        // createdBy is always the writer's own repo, even when --repo targets another canvas.
+        const own = ownRepo();
+        const repo = typeof flags["repo"] === "string" ? flags["repo"] : own;
         const frame =
           frameId === undefined
-            ? store.createFrame({ html, name, width, height, x: num(flags, "x"), y: num(flags, "y") })
+            ? store.createFrame({ html, name, width, height, x: num(flags, "x"), y: num(flags, "y"), repo, createdBy: own })
             : store.updateFrameHtml(frameId, html, { name, width, height });
         const canvas = await liveCanvasUrl(config);
         if (json) {
@@ -161,7 +175,7 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
         const authorRaw = flags["author"];
         const author = authorRaw === "human" || authorRaw === "agent" ? authorRaw : undefined;
         const includeResolved = flags["resolved"] === true;
-        const comments = store.listComments({ frameId, since, includeResolved, author });
+        const comments = store.listComments({ frameId, since, includeResolved, author, repo: repoFlag(flags) });
         const cursor = store.nextCursor(comments, since);
         if (json) {
           out(JSON.stringify({ comments, cursor }, null, 2));
@@ -225,7 +239,7 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
       }
 
       case "list": {
-        const frames = store.listFrames();
+        const frames = store.listFrames(repoFlag(flags));
         const canvas = await liveCanvasUrl(config);
         if (json) {
           out(JSON.stringify({ frames, canvasUrl: canvas === null ? null : `${canvas}/` }, null, 2));
@@ -252,7 +266,7 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
       }
 
       case "tidy": {
-        const frames = store.tidyFrames();
+        const frames = store.tidyFrames(repoFlag(flags));
         out(json ? JSON.stringify({ frames }, null, 2) : `re-packed ${frames.length} frame(s).`);
         return 0;
       }
@@ -290,9 +304,10 @@ function printHelp(): void {
       "  tracepaper push <file>           draw a frame from an HTML file (`-` for stdin, or --html <str>)",
       "      --name --width --height --x --y   frame metadata; omit x/y to auto-place",
       "      --frame <id>                 update an existing frame instead of creating one",
-      "  tracepaper list                  list frames, sizes, positions, open-comment counts",
+      "      --repo <x>                   which repo/canvas to draw on (default: git remote / cwd)",
+      "  tracepaper list                  list frames, sizes, positions, open-comment counts (--repo <x>)",
       "  tracepaper get <frameId>         print a frame's current HTML",
-      "  tracepaper comments              read human feedback (--since <cursor> --frame <id> --resolved)",
+      "  tracepaper comments              read human feedback (--since <cursor> --frame <id> --resolved --repo <x>)",
       "  tracepaper reply <id> <text…>    reply to a comment thread",
       "  tracepaper resolve <id>          resolve a thread (--note <text> to reply and resolve)",
       "  tracepaper tidy                  re-pack frames so none overlap",

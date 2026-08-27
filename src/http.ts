@@ -185,7 +185,7 @@ async function route(ctx: Context): Promise<Response> {
     if (path === "/api/events" && method === "GET") return handleEvents(ctx);
 
     if (path === "/api/frames") {
-      if (method === "GET") return handleListFrames(ctx);
+      if (method === "GET") return handleListFrames(ctx, url);
       if (method === "POST") return await handleCreateOrUpdateFrame(ctx);
       return methodNotAllowed(method, path);
     }
@@ -259,8 +259,10 @@ function handleHealth(ctx: Context): Response {
   return json(HealthSchema.parse({ ok: true, frames, comments }));
 }
 
-function handleListFrames(ctx: Context): Response {
-  return json({ frames: ctx.store.listFrames() });
+function handleListFrames(ctx: Context, url: URL): Response {
+  // ?repo= scopes to one canvas; omitted returns every frame, so the web still shows all for now.
+  const repo = url.searchParams.get("repo");
+  return json({ frames: ctx.store.listFrames(repo === null ? undefined : repo) });
 }
 
 function handleGetFrame(ctx: Context, id: string): Response {
@@ -273,15 +275,18 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
 
   const parsed = CreateOrUpdateFrameBodySchema.safeParse(body);
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
-  const { html, name, frameId, width, height, x, y } = parsed.data;
+  const { html, name, frameId, width, height, x, y, repo, createdBy } = parsed.data;
 
   if (frameId !== undefined) {
+    // Updates stay on the frame's existing canvas — repo/createdBy are not touched.
     const frame = ctx.store.updateFrameHtml(frameId, html, { name, width, height });
     ctx.bus.emit({ type: "frame.updated", frame: toFramePayload(frame) });
     return json(frame);
   }
 
-  const frame = ctx.store.createFrame({ html, name, width, height, x, y });
+  // No per-connection identity on the HTTP layer: repo/createdBy come from the body (the CLI maps
+  // --repo here); repo defaults to 'default' at the store when absent.
+  const frame = ctx.store.createFrame({ html, name, width, height, x, y, repo, createdBy });
   ctx.bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
   return json(frame, 201);
 }

@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS frames (
   x         REAL    NOT NULL,
   y         REAL    NOT NULL,
   version   INTEGER NOT NULL,
+  repo      TEXT    NOT NULL DEFAULT 'default',
+  createdBy TEXT,
   createdAt TEXT    NOT NULL,
   updatedAt TEXT    NOT NULL
 );
@@ -83,6 +85,7 @@ const INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_comments_frameId    ON comments(frameId);
 CREATE INDEX IF NOT EXISTS idx_comments_createdAt  ON comments(createdAt);
 CREATE INDEX IF NOT EXISTS idx_comments_updatedSeq ON comments(updatedSeq);
+CREATE INDEX IF NOT EXISTS idx_frames_repo         ON frames(repo);
 `;
 
 type FrameRow = {
@@ -94,6 +97,8 @@ type FrameRow = {
   x: number;
   y: number;
   version: number;
+  repo: string;
+  createdBy: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -200,6 +205,17 @@ export class Store {
    * rather than recreated so an existing canvas keeps its frames and comments.
    */
   private migrate(): void {
+    const frameColumns = new Set(
+      (this.db.query("PRAGMA table_info(frames)").all() as { name: string }[]).map((c) => c.name),
+    );
+    // Pre-repo frames land on 'default'; a NOT NULL DEFAULT backfills the existing rows in place.
+    if (!frameColumns.has("repo")) {
+      this.db.exec("ALTER TABLE frames ADD COLUMN repo TEXT NOT NULL DEFAULT 'default'");
+    }
+    if (!frameColumns.has("createdBy")) {
+      this.db.exec("ALTER TABLE frames ADD COLUMN createdBy TEXT");
+    }
+
     const columns = new Set(
       (this.db.query("PRAGMA table_info(comments)").all() as { name: string }[]).map((c) => c.name),
     );
@@ -243,11 +259,11 @@ export class Store {
   // ---------- frames ----------
 
   createFrame(input: CreateFrameInput): Frame {
-    const { html, name, width, height, x, y } = CreateFrameInputSchema.parse(input);
+    const { html, name, width, height, x, y, repo, createdBy } = CreateFrameInputSchema.parse(input);
     // The layout slot and the slot name are both read-then-written. Two processes on one db
     // otherwise pick the same x and the same "Frame N", stacking one frame invisibly on another.
     return this.db
-      .transaction(() => this.insertFrame({ html, name, width, height, x, y }))
+      .transaction(() => this.insertFrame({ html, name, width, height, x, y, repo, createdBy }))
       .immediate();
   }
 
@@ -258,27 +274,32 @@ export class Store {
     height: number;
     x?: number | undefined;
     y?: number | undefined;
+    repo: string;
+    createdBy?: string | undefined;
   }): Frame {
-    const { html, name, width, height } = input;
+    const { html, name, width, height, repo } = input;
     const at = nowIso();
-    const auto = this.nextFramePosition(width, height);
+    // Auto-placement only considers frames in the same repo, so canvases lay out independently.
+    const auto = this.nextFramePosition(width, height, repo);
     const frame: Frame = {
       id: newFrameId(),
-      name: name === undefined ? this.nextFrameName() : name,
+      name: name === undefined ? this.nextFrameName(repo) : name,
       html,
       width,
       height,
       x: input.x === undefined ? auto.x : input.x,
       y: input.y === undefined ? auto.y : input.y,
       version: 1,
+      repo,
+      createdBy: input.createdBy ?? null,
       createdAt: at,
       updatedAt: at,
     };
 
     this.db
       .query(
-        `INSERT INTO frames (id, name, html, width, height, x, y, version, createdAt, updatedAt)
-         VALUES ($id, $name, $html, $width, $height, $x, $y, $version, $createdAt, $updatedAt)`,
+        `INSERT INTO frames (id, name, html, width, height, x, y, version, repo, createdBy, createdAt, updatedAt)
+         VALUES ($id, $name, $html, $width, $height, $x, $y, $version, $repo, $createdBy, $createdAt, $updatedAt)`,
       )
       .run({
         $id: frame.id,
@@ -289,6 +310,8 @@ export class Store {
         $x: frame.x,
         $y: frame.y,
         $version: frame.version,
+        $repo: frame.repo,
+        $createdBy: frame.createdBy,
         $createdAt: frame.createdAt,
         $updatedAt: frame.updatedAt,
       });
@@ -336,10 +359,12 @@ export class Store {
     return this.db.query("SELECT 1 FROM frames WHERE id = ?").get(id) !== null;
   }
 
-  listFrames(): FrameSummary[] {
+  /** All frames, or — when `repo` is given — only those on that canvas. */
+  listFrames(repo?: string): FrameSummary[] {
     const rows = this.db
       .query(
-        `SELECT f.id, f.name, f.width, f.height, f.x, f.y, f.version, f.createdAt, f.updatedAt,
+        `SELECT f.id, f.name, f.width, f.height, f.x, f.y, f.version, f.repo, f.createdBy,
+                f.createdAt, f.updatedAt,
                 (SELECT COUNT(*) FROM comments c
                   WHERE c.frameId = f.id AND c.deletedAt IS NULL) AS commentCount,
                 -- Only thread roots count as open feedback, so this matches the number the
@@ -348,10 +373,23 @@ export class Store {
                   WHERE c.frameId = f.id AND c.deletedAt IS NULL
                     AND c.resolved = 0 AND c.parentId IS NULL) AS unresolvedCount
          FROM frames f
+         ${repo === undefined ? "" : "WHERE f.repo = $repo"}
          ORDER BY f.x ASC, f.createdAt ASC`,
       )
-      .all() as FrameSummaryRow[];
+      .all(repo === undefined ? {} : { $repo: repo }) as FrameSummaryRow[];
     return rows.map((row) => FrameSummarySchema.parse(row));
+  }
+
+  /** Every repo/canvas on this db, with its frame count and most-recent frame update. */
+  listRepos(): { repo: string; frameCount: number; updatedAt: string | null }[] {
+    return this.db
+      .query(
+        `SELECT repo, COUNT(*) AS frameCount, MAX(updatedAt) AS updatedAt
+           FROM frames
+          GROUP BY repo
+          ORDER BY updatedAt DESC`,
+      )
+      .all() as { repo: string; frameCount: number; updatedAt: string | null }[];
   }
 
   deleteFrame(id: string): void {
@@ -432,30 +470,42 @@ export class Store {
 
     if (filter.frameId !== undefined) {
       if (!this.hasFrame(filter.frameId)) throw new Error(`unknown frame: ${filter.frameId}`);
-      where.push("frameId = $frameId");
+      where.push("c.frameId = $frameId");
       params.$frameId = filter.frameId;
     }
     if (filter.author !== undefined) {
-      where.push("author = $author");
+      where.push("c.author = $author");
       params.$author = filter.author;
     }
     if (filter.includeResolved !== true) {
-      where.push("resolved = 0");
+      where.push("c.resolved = 0");
+    }
+    if (filter.repo !== undefined) {
+      // Scope to comments whose frame is on this canvas — the join is the only place the repo lives.
+      where.push("f.repo = $repo");
+      params.$repo = filter.repo;
     }
     if (filter.since !== undefined) {
       const since = this.resolveSince(filter.since);
       if (since.kind === "seq") {
-        where.push("updatedSeq > $sinceSeq");
+        where.push("c.updatedSeq > $sinceSeq");
         params.$sinceSeq = since.value;
       } else {
-        where.push("createdAt > $sinceAt");
+        where.push("c.createdAt > $sinceAt");
         params.$sinceAt = since.value;
       }
     }
-    where.push("deletedAt IS NULL");
+    where.push("c.deletedAt IS NULL");
 
+    const columns = COMMENT_COLUMNS.split(", ")
+      .map((col) => `c.${col}`)
+      .join(", ");
     const rows = this.db
-      .query(`SELECT ${COMMENT_COLUMNS} FROM comments WHERE ${where.join(" AND ")} ORDER BY updatedSeq ASC`)
+      .query(
+        `SELECT ${columns} FROM comments c
+         JOIN frames f ON f.id = c.frameId
+         WHERE ${where.join(" AND ")} ORDER BY c.updatedSeq ASC`,
+      )
       .all(params) as CommentRow[];
     return rows.map(toComment);
   }
@@ -615,12 +665,14 @@ export class Store {
    * themselves. For a canvas that already overlaps — because it was built before placement
    * became collision-aware, or because an agent placed frames by hand badly.
    */
-  tidyFrames(): FrameSummary[] {
+  tidyFrames(repo: string): FrameSummary[] {
     return this.db
       .transaction(() => {
         const frames = this.db
-          .query("SELECT id, width, height FROM frames ORDER BY height DESC, width DESC, createdAt ASC")
-          .all() as { id: string; width: number; height: number }[];
+          .query(
+            "SELECT id, width, height FROM frames WHERE repo = $repo ORDER BY height DESC, width DESC, createdAt ASC",
+          )
+          .all({ $repo: repo }) as { id: string; width: number; height: number }[];
 
         const placed: Box[] = [];
         const update = this.db.query("UPDATE frames SET x = $x, y = $y WHERE id = $id");
@@ -630,20 +682,25 @@ export class Store {
           placed.push({ x: at.x, y: at.y, width: frame.width, height: frame.height });
           update.run({ $x: at.x, $y: at.y, $id: frame.id });
         }
-        return this.listFrames();
+        return this.listFrames(repo);
       })
       .immediate();
   }
 
-  private nextFramePosition(width: number, height: number): { x: number; y: number } {
-    const boxes = this.db.query("SELECT x, y, width, height FROM frames").all() as Box[];
+  private nextFramePosition(width: number, height: number, repo: string): { x: number; y: number } {
+    // Only frames on the same canvas are considered, so two repos both place from the origin.
+    const boxes = this.db
+      .query("SELECT x, y, width, height FROM frames WHERE repo = $repo")
+      .all({ $repo: repo }) as Box[];
     if (boxes.length === 0) return { x: 0, y: 0 };
     return findFreeSlot(boxes, width, height);
   }
 
   /** Frame.name is required by the data model; push_html's is optional, so unnamed frames get a slot label. */
-  private nextFrameName(): string {
-    const row = this.db.query("SELECT COUNT(*) AS n FROM frames").get() as { n: number };
+  private nextFrameName(repo: string): string {
+    const row = this.db
+      .query("SELECT COUNT(*) AS n FROM frames WHERE repo = $repo")
+      .get({ $repo: repo }) as { n: number };
     return `Frame ${row.n + 1}`;
   }
 }

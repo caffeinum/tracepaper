@@ -8,6 +8,7 @@ import { loadConfig, type Config } from "./config.ts";
 import { Bus } from "./events.ts";
 import { startHttpServer, type HttpServer } from "./http.ts";
 import { createMcpServer } from "./mcp.ts";
+import { resolveRepo } from "./repo.ts";
 import { Store } from "./store.ts";
 import { RemoteTunnelView, Tunnel } from "./tunnel.ts";
 
@@ -142,7 +143,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const server = createMcpServer({ store, bus, baseUrl: canvasUrl });
+  // Resolve the repo in THIS stdio process, from its own cwd/env — the shared http server has no
+  // per-connection identity, so a joined agent's canvas must be resolved here, not there.
+  const defaultRepo = resolveRepo(process.env, process.cwd());
+  console.error(`[tracepaper] this connection's canvas: ${defaultRepo}`);
+  const server = createMcpServer({ store, bus, baseUrl: canvasUrl, defaultRepo });
   await server.connect(tolerateAbsentToolArguments(new StdioServerTransport()));
   // The http server holds the process open, so a hung-up client must be shut down explicitly.
   // The SDK's stdio transport never watches stdin for EOF, so watch it here.

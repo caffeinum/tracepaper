@@ -32,6 +32,7 @@ const TOOL_NAMES = [
   "delete_frame",
   "get_comments",
   "get_frame",
+  "list_canvases",
   "list_frames",
   "push_html",
   "reply_to_comment",
@@ -194,7 +195,8 @@ test("push_html creates a frame whose canvasUrl and raw html url are both live",
     expect(pushed.frameId).toMatch(/^frm_[0-9a-f]{12}$/);
     expect(pushed.name).toBe("Landing");
     expect(pushed.version).toBe(1);
-    expect(pushed.canvasUrl).toBe(`${s.base}/`);
+    // canvasUrl now carries the connection's repo so the human opens the right canvas.
+    expect(pushed.canvasUrl).toStartWith(`${s.base}/?repo=`);
     expect(pushed.url).toBe(`${s.base}/f/${pushed.frameId}`);
     expect(textOf(await s.call("list_frames", {}))).toContain(pushed.canvasUrl);
 

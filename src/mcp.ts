@@ -4,12 +4,14 @@ import { toFramePayload, type Bus } from "./events.ts";
 import type { Store } from "./store.ts";
 import {
   GetCommentsResultSchema,
+  ListCanvasesResultSchema,
   ListFramesResultSchema,
   PushHtmlResultSchema,
   GetFrameResultSchema,
   deleteFrameShape,
   getCommentsShape,
   getFrameShape,
+  listCanvasesShape,
   listFramesShape,
   pushHtmlShape,
   replyToCommentShape,
@@ -18,6 +20,7 @@ import {
   type FrameSummary,
   type GetCommentsResult,
   type GetFrameResult,
+  type ListCanvasesResult,
   type ListFramesResult,
   type PushHtmlResult,
 } from "./types.ts";
@@ -31,6 +34,8 @@ export type McpServerDeps = {
   bus: Bus;
   /** Lazy — the http server picks its real port at boot, after this server is built. */
   baseUrl: () => string;
+  /** This connection's repo/canvas, resolved from its own cwd/env. Frames default here. */
+  defaultRepo: string;
 };
 
 const PUSH_HTML_DESCRIPTION = [
@@ -54,6 +59,11 @@ const PUSH_HTML_DESCRIPTION = [
   "click anywhere on a frame to drop a pin, and type feedback there. Read that feedback back with",
   "get_comments — poll it with the cursor it returns. Answer with reply_to_comment, and close the",
   "loop with resolve_comment once you have acted on a note.",
+  "",
+  "CANVAS/REPO: frames belong to a repo (a canvas). This draws on your own repo — auto-detected",
+  "from git/TRACEPAPER_REPO — by default; pass repo to draw on another (list_canvases lists them).",
+  "Auto-placement is per-canvas, so repos never collide. Updating an existing frameId keeps it on",
+  "its current canvas.",
 ].join("\n");
 
 const GET_COMMENTS_DESCRIPTION = [
@@ -72,12 +82,21 @@ const GET_COMMENTS_DESCRIPTION = [
   "Resolved comments are excluded unless includeResolved is true.",
   "An empty list means nothing is new SINCE THE CURSOR — not that nothing is outstanding. The",
   "header tells you how many threads are still unresolved.",
+  "",
+  "Scoped to your own repo/canvas by default; pass repo to read another canvas's feedback.",
 ].join("\n");
 
 const LIST_FRAMES_DESCRIPTION = [
-  "List every frame on the canvas with its size, position, version, and comment counts",
-  "(html omitted). Use it to find the frameId to update with push_html, or to see which frames",
-  "still have unresolved feedback. Also returns canvasUrl to hand to the human.",
+  "List frames with their size, position, version, and comment counts (html omitted). Scoped to",
+  'this connection\'s repo/canvas by default; pass repo to list another, or repo: "*" for every',
+  "canvas. Use it to find the frameId to update with push_html, or to see which frames still have",
+  "unresolved feedback. Also returns canvasUrl to hand to the human.",
+].join("\n");
+
+const LIST_CANVASES_DESCRIPTION = [
+  "List every repo/canvas on this server with frame counts — find another canvas to read or write.",
+  "Each canvas is a repo scope; push_html, get_comments and list_frames default to this",
+  "connection's own, but take a repo argument to reach any of these.",
 ].join("\n");
 
 const RESOLVE_COMMENT_DESCRIPTION = [
@@ -143,8 +162,10 @@ function describeComment(comment: Comment, frame: FrameSummary | undefined): str
   return `- ${comment.id}${thread} [${comment.author}] ${where} — ${age}: ${comment.text}`;
 }
 
-export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServer {
-  const canvasUrl = (): string => `${baseUrl()}/`;
+export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerDeps): McpServer {
+  // The url opens the canvas scoped to a specific repo, so an agent hands the human the right one.
+  const canvasUrl = (repo: string): string =>
+    `${baseUrl()}/?repo=${encodeURIComponent(repo)}`;
   const frameUrl = (frameId: string): string => `${baseUrl()}/f/${frameId}`;
 
   const server = new McpServer(
@@ -167,11 +188,15 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
       inputSchema: pushHtmlShape,
       outputSchema: PushHtmlResultSchema,
     },
-    ({ html, name, frameId, width, height, x, y }) => {
+    ({ html, name, frameId, width, height, x, y, repo }) => {
       try {
+        // createdBy is always the WRITER's own repo — so a cross-repo write still records who
+        // made it — while `repo` is the target canvas (args.repo overrides for a cross-repo draw).
+        // An update stays on the frame's existing canvas and keeps its original createdBy.
+        const target = repo ?? defaultRepo;
         const frame =
           frameId === undefined
-            ? store.createFrame({ html, name, width, height, x, y })
+            ? store.createFrame({ html, name, width, height, x, y, repo: target, createdBy: defaultRepo })
             : store.updateFrameHtml(frameId, html, { name, width, height });
         bus.emit({
           type: frameId === undefined ? "frame.created" : "frame.updated",
@@ -183,13 +208,13 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
           name: frame.name,
           version: frame.version,
           url: frameUrl(frame.id),
-          canvasUrl: canvasUrl(),
+          canvasUrl: canvasUrl(frame.repo),
         };
 
         const action = frameId === undefined ? "Created" : "Updated";
         return structuredResult(
           [
-            `${action} frame ${frame.id} "${frame.name}" (v${frame.version}, ${frame.width}x${frame.height}) at (${frame.x},${frame.y}).`,
+            `${action} frame ${frame.id} "${frame.name}" (v${frame.version}, ${frame.width}x${frame.height}) at (${frame.x},${frame.y}) on canvas "${frame.repo}".`,
             `Ask the human to open the canvas at ${result.canvasUrl} and leave comments on the frame.`,
             `Then poll get_comments (frameId: "${frame.id}") to read what they wrote.`,
             `Raw frame html: ${result.url}`,
@@ -210,9 +235,11 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
       inputSchema: getCommentsShape,
       outputSchema: GetCommentsResultSchema,
     },
-    ({ frameId, since, includeResolved, author }) => {
+    ({ frameId, since, includeResolved, author, repo }) => {
       try {
-        const comments = store.listComments({ frameId, since, includeResolved, author });
+        // Default to this connection's own canvas, so an agent only sees its own repo's feedback.
+        const scope = repo ?? defaultRepo;
+        const comments = store.listComments({ frameId, since, includeResolved, author, repo: scope });
         const touched = new Set(comments.map((c) => c.frameId));
         const byId = new Map(store.listFrames().filter((f) => touched.has(f.id)).map((f) => [f.id, f]));
         const result: GetCommentsResult = {
@@ -229,7 +256,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
 
         const mine = comments.filter((c) => c.author === "agent").length;
         const open = store
-          .listComments({ frameId })
+          .listComments({ frameId, repo: scope })
           .filter((c) => c.parentId === null && c.author === "human").length;
 
         // An empty page does not mean "nothing to do" — it means nothing is new since the
@@ -237,9 +264,9 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         const header =
           comments.length === 0
             ? since === undefined
-              ? `No comments yet. Ask the human to open ${canvasUrl()} and mark up the frame, then poll again.`
+              ? `No comments yet on canvas "${scope}". Ask the human to open ${canvasUrl(scope)} and mark up the frame, then poll again.`
               : `Nothing new since that cursor. ${open} thread(s) from the human are still unresolved — call get_comments without \`since\` to re-read them. If that is 0, the human has not written anything new: wait ~30s and poll again.`
-            : `${comments.length} comment(s)${mine === 0 ? "" : ` (${mine} your own replies)`}, oldest first. Pass since: "${result.cursor}" next poll. Canvas: ${canvasUrl()}`;
+            : `${comments.length} comment(s)${mine === 0 ? "" : ` (${mine} your own replies)`}, oldest first. Pass since: "${result.cursor}" next poll. Canvas: ${canvasUrl(scope)}`;
 
         return structuredResult(
           [header, ...comments.map((c) => describeComment(c, byId.get(c.frameId)))].join("\n"),
@@ -259,17 +286,51 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
       inputSchema: listFramesShape,
       outputSchema: ListFramesResultSchema,
     },
-    () => {
+    ({ repo }) => {
       try {
-        const result: ListFramesResult = { frames: store.listFrames(), canvasUrl: canvasUrl() };
+        // Default to this connection's own canvas; "*" is the escape hatch for every canvas.
+        const scope = repo ?? defaultRepo;
+        const all = scope === "*";
+        const result: ListFramesResult = {
+          frames: store.listFrames(all ? undefined : scope),
+          canvasUrl: canvasUrl(all ? defaultRepo : scope),
+        };
         const lines = result.frames.map(
           (frame) =>
-            `- ${frame.id} "${frame.name}" v${frame.version} ${frame.width}x${frame.height} @ (${frame.x},${frame.y}) — ${frame.commentCount} comment(s), ${frame.unresolvedCount} unresolved`,
+            `- ${frame.id} "${frame.name}" v${frame.version} ${frame.width}x${frame.height} @ (${frame.x},${frame.y})${all ? ` [${frame.repo}]` : ""} — ${frame.commentCount} comment(s), ${frame.unresolvedCount} unresolved`,
         );
+        const scopeLabel = all ? "all canvases" : `canvas "${scope}"`;
         const header =
           result.frames.length === 0
-            ? `Canvas is empty. Push a frame with push_html; the human watches it at ${result.canvasUrl}`
-            : `${result.frames.length} frame(s) on the canvas at ${result.canvasUrl}`;
+            ? `No frames on ${scopeLabel}. Push a frame with push_html; the human watches it at ${result.canvasUrl}`
+            : `${result.frames.length} frame(s) on ${scopeLabel} at ${result.canvasUrl}`;
+        return structuredResult([header, ...lines].join("\n"), result);
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_canvases",
+    {
+      title: "List repos/canvases",
+      description: LIST_CANVASES_DESCRIPTION,
+      inputSchema: listCanvasesShape,
+      outputSchema: ListCanvasesResultSchema,
+    },
+    () => {
+      try {
+        const canvases = store.listRepos();
+        const result: ListCanvasesResult = { canvases, canvasUrl: canvasUrl(defaultRepo) };
+        const lines = canvases.map(
+          (c) =>
+            `- ${c.repo}${c.repo === defaultRepo ? " (yours)" : ""} — ${c.frameCount} frame(s)${c.updatedAt === null ? "" : `, updated ${c.updatedAt}`}`,
+        );
+        const header =
+          canvases.length === 0
+            ? "No canvases yet. push_html creates the first frame on your canvas."
+            : `${canvases.length} canvas(es). Yours is "${defaultRepo}". Pass repo to push_html/get_comments/list_frames to reach another.`;
         return structuredResult([header, ...lines].join("\n"), result);
       } catch (error) {
         return errorResult(error);
@@ -338,7 +399,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         });
         bus.emit({ type: "comment.created", comment: reply });
         return textResult(
-          `Replied ${reply.id} to ${target.id} on frame ${target.frameId}. The human sees it live at ${canvasUrl()}`,
+          `Replied ${reply.id} to ${target.id} on frame ${target.frameId}. The human sees it live at ${canvasUrl(store.getFrame(target.frameId).repo)}`,
         );
       } catch (error) {
         return errorResult(error);
@@ -360,7 +421,7 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
         const result: GetFrameResult = {
           ...frame,
           url: frameUrl(frame.id),
-          canvasUrl: canvasUrl(),
+          canvasUrl: canvasUrl(frame.repo),
         };
         return structuredResult(
           [
@@ -387,11 +448,11 @@ export function createMcpServer({ store, bus, baseUrl }: McpServerDeps): McpServ
     },
     () => {
       try {
-        const frames = store.tidyFrames();
+        const frames = store.tidyFrames(defaultRepo);
         for (const frame of frames) {
           bus.emit({ type: "frame.updated", frame: toFramePayload({ ...frame, html: "" }) });
         }
-        const result: ListFramesResult = { frames, canvasUrl: canvasUrl() };
+        const result: ListFramesResult = { frames, canvasUrl: canvasUrl(defaultRepo) };
         return structuredResult(
           [
             `Re-packed ${frames.length} frame(s); nothing overlaps now.`,
