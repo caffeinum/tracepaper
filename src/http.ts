@@ -184,6 +184,11 @@ async function route(ctx: Context): Promise<Response> {
     }
     if (path === "/api/events" && method === "GET") return handleEvents(ctx);
 
+    if (path === "/api/repos") {
+      if (method === "GET") return handleListRepos(ctx);
+      return methodNotAllowed(method, path);
+    }
+
     if (path === "/api/frames") {
       if (method === "GET") return handleListFrames(ctx, url);
       if (method === "POST") return await handleCreateOrUpdateFrame(ctx);
@@ -257,6 +262,11 @@ function handleShareStop(ctx: Context): Response {
 function handleHealth(ctx: Context): Response {
   const { frames, comments } = ctx.store.counts();
   return json(HealthSchema.parse({ ok: true, frames, comments }));
+}
+
+function handleListRepos(ctx: Context): Response {
+  // Every canvas on this db, so the web switcher can list them with their frame counts.
+  return json({ repos: ctx.store.listRepos() });
 }
 
 function handleListFrames(ctx: Context, url: URL): Response {

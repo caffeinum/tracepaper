@@ -301,6 +301,49 @@ code {
   font-weight: 500;
 }
 
+/* Canvas switcher — a native select kept deliberately plain so it never breaks, dressed to sit in
+   the drafting-table chip: handwritten face, ink text, a small drawn chevron. */
+.repo-switcher {
+  max-width: 260px;
+  margin: -2px 0;
+  padding: 2px 20px 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b857c' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  color: var(--ink);
+  font-family: var(--hand);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  text-overflow: ellipsis;
+}
+
+.repo-switcher:hover {
+  border-color: var(--line-strong);
+}
+
+.repo-switcher:focus-visible {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Native option lists paint in the OS colours, not the chip's — pin them to the surface so dark
+   mode does not flash a white menu. */
+.repo-switcher option {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -611,6 +654,18 @@ code {
 
 .frame:hover .frame-dims {
   opacity: 1;
+}
+
+/* Attribution — who pushed the frame. Shown only in the All-canvases view (toggled from JS).
+   Muted mono so it reads as metadata beside the dims, never competing with the handwritten title. */
+.frame-by {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.frame-by[hidden] {
+  display: none;
 }
 
 .frame-kill {

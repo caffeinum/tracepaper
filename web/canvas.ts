@@ -23,7 +23,14 @@ type CanvasFrame = {
   x: number;
   y: number;
   version: number;
+  /** The canvas/scope this frame belongs to; used by the repo switcher and SSE filtering. */
+  repo: string;
+  /** Who pushed the frame, shown as attribution in the "All canvases" view. Null when unknown. */
+  createdBy: string | null;
 };
+
+/** One canvas the switcher can offer, with its frame count. */
+type RepoInfo = { repo: string; frameCount: number };
 
 type CanvasComment = {
   id: string;
@@ -65,6 +72,13 @@ function bool(source: Record<string, unknown>, key: string, what: string): boole
   return value;
 }
 
+function strOrNull(source: Record<string, unknown>, key: string, what: string): string | null {
+  const value = source[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw new Error(`${what}.${key} must be a string or null, got ${preview(value)}`);
+  return value;
+}
+
 function toFrame(raw: unknown): CanvasFrame {
   if (!isRecord(raw)) throw new Error(`frame must be an object, got ${preview(raw)}`);
   return {
@@ -75,7 +89,14 @@ function toFrame(raw: unknown): CanvasFrame {
     x: num(raw, "x", "frame"),
     y: num(raw, "y", "frame"),
     version: num(raw, "version", "frame"),
+    repo: str(raw, "repo", "frame"),
+    createdBy: strOrNull(raw, "createdBy", "frame"),
   };
+}
+
+function toRepo(raw: unknown): RepoInfo {
+  if (!isRecord(raw)) throw new Error(`repo must be an object, got ${preview(raw)}`);
+  return { repo: str(raw, "repo", "repo"), frameCount: num(raw, "frameCount", "repo") };
 }
 
 function toComment(raw: unknown): CanvasComment {
@@ -187,6 +208,7 @@ const sharePanel = el<HTMLElement>("share");
 const shareBody = el<HTMLDivElement>("share-body");
 const shareClose = el<HTMLButtonElement>("share-close");
 const themeToggle = el<HTMLButtonElement>("theme-toggle");
+const repoSwitcher = el<HTMLSelectElement>("repo-switcher");
 
 // ---------------------------------------------------------------- state
 
@@ -207,6 +229,12 @@ let interactiveFrameId: string | null = null;
 let selectedFrameId: string | null = null;
 let spaceHeld = false;
 let hasFitted = false;
+/**
+ * The canvas currently in view. null means "All canvases" — every repo's frames unfiltered.
+ * It rides in the URL query (?repo=…) so a canvas is linkable, and every data fetch and SSE
+ * update is scoped through it so a filtered view stays filtered.
+ */
+let currentRepo: string | null = null;
 // ⌘0 alternates between framing the selection and the whole canvas; this holds which comes next.
 let cmd0FitsAll = false;
 
@@ -504,6 +532,7 @@ type FrameNode = {
   root: HTMLDivElement;
   name: HTMLSpanElement;
   dims: HTMLSpanElement;
+  by: HTMLSpanElement;
   body: HTMLDivElement;
   iframe: HTMLIFrameElement;
   pins: HTMLDivElement;
@@ -531,6 +560,10 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   name.className = "frame-name";
   const dims = document.createElement("span");
   dims.className = "frame-dims";
+  // Attribution — who pushed the frame. Only shown in the "All canvases" view; see renderFrames.
+  const by = document.createElement("span");
+  by.className = "frame-by";
+  by.hidden = true;
   makeDraggable(name, frame.id);
   const kill = document.createElement("button");
   kill.className = "frame-kill";
@@ -538,7 +571,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   kill.title = "Delete frame";
   kill.textContent = "✕";
   kill.addEventListener("click", () => requestDeleteFrame(frame.id));
-  label.append(name, dims, kill);
+  label.append(name, dims, by, kill);
 
   const body = document.createElement("div");
   body.className = "frame-body";
@@ -599,7 +632,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   body.append(sketchFill, iframe, sketch, catcher, pins);
   root.append(label, body, hint);
   const node: FrameNode = {
-    root, name, dims, body, iframe, pins, version: -1,
+    root, name, dims, by, body, iframe, pins, version: -1,
     sketchSeed: hashId(frame.id),
     sketchFill, sketch, sketchFillPath, sketchInk1, sketchInk2,
     sketchW: -1, sketchH: -1,
@@ -627,6 +660,10 @@ function renderFrames(): void {
     }
     node.name.textContent = frame.name;
     node.dims.textContent = `${Math.round(frame.width)} × ${Math.round(frame.height)}`;
+    // Attribution is redundant once you have filtered to one canvas, so it only shows in All view.
+    const showBy = currentRepo === null && frame.createdBy !== null;
+    node.by.textContent = showBy ? (frame.createdBy ?? "") : "";
+    node.by.hidden = !showBy;
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
     if (node.version !== frame.version) {
       node.version = frame.version;
@@ -1178,6 +1215,71 @@ function applyFrameHash(animate = false): boolean {
   return true;
 }
 
+// ---------------------------------------------------------------- repo switcher
+
+/** The canvas named in the URL query, or null for "All canvases". */
+function repoFromQuery(): string | null {
+  const value = new URLSearchParams(window.location.search).get("repo");
+  return value === null || value === "" ? null : value;
+}
+
+/**
+ * The address bar carries the current canvas as `?repo=…`, so a filtered view is linkable.
+ * replaceState (not a navigation) and the existing `#frame=` hash is preserved untouched — repo
+ * is the query, frame is the hash, and the two never clobber each other.
+ */
+function writeRepoQuery(repo: string | null): void {
+  const search = repo === null ? "" : `?repo=${encodeURIComponent(repo)}`;
+  history.replaceState(null, "", `${window.location.pathname}${search}${window.location.hash}`);
+}
+
+/** Rebuilds the switcher's options, preserving the current selection even if its repo is now empty. */
+function renderRepoSwitcher(repos: RepoInfo[]): void {
+  const selected = currentRepo;
+  repoSwitcher.replaceChildren();
+
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All canvases";
+  repoSwitcher.appendChild(all);
+
+  for (const info of repos) {
+    const option = document.createElement("option");
+    option.value = info.repo;
+    option.textContent = `${info.repo} · ${info.frameCount}`;
+    repoSwitcher.appendChild(option);
+  }
+  // Keep the current selection selectable even when its canvas has just gone empty (0 frames drop
+  // it from listRepos), so the view does not silently snap back to "All".
+  if (selected !== null && !repos.some((info) => info.repo === selected)) {
+    const option = document.createElement("option");
+    option.value = selected;
+    option.textContent = `${selected} · 0`;
+    repoSwitcher.appendChild(option);
+  }
+  repoSwitcher.value = selected ?? "";
+}
+
+/**
+ * Switch canvases: reset the selection/interaction that belonged to the old canvas, point the URL
+ * at the new one, then refetch + re-render + re-fit so the view lands on the newly chosen canvas.
+ */
+async function setRepo(next: string | null): Promise<void> {
+  if (next === currentRepo) return;
+  currentRepo = next;
+  setSelected(null);
+  setInteractive(null);
+  closePanel();
+  writeRepoQuery(next);
+  hasFitted = false; // loadAll re-fits the fresh canvas
+  await loadAll();
+}
+
+repoSwitcher.addEventListener("change", () => {
+  const value = repoSwitcher.value;
+  void setRepo(value === "" ? null : value).catch(fail);
+});
+
 function updateCursor(): void {
   // Space (or the pan tool) means a hand; a live drag shows the closed hand. Otherwise the tool
   // decides: comment shows the pin, select shows the default arrow.
@@ -1546,9 +1648,14 @@ el<HTMLButtonElement>("copy-config").addEventListener("click", (event) => {
 // ---------------------------------------------------------------- data + sse
 
 async function loadAll(): Promise<void> {
-  const [framePayload, commentPayload] = await Promise.all([
-    api("/api/frames"),
-    api("/api/comments?includeResolved=true"),
+  // Scope both frames and comments to the selected canvas so pins match the visible frames; null
+  // fetches everything unfiltered. The repo list is always fetched whole — the switcher offers
+  // every canvas regardless of which one is in view.
+  const scope = currentRepo === null ? "" : `&repo=${encodeURIComponent(currentRepo)}`;
+  const [framePayload, commentPayload, repoPayload] = await Promise.all([
+    api(currentRepo === null ? "/api/frames" : `/api/frames?repo=${encodeURIComponent(currentRepo)}`),
+    api(`/api/comments?includeResolved=true${scope}`),
+    api("/api/repos"),
   ]);
   frames.clear();
   frameOrder.length = 0;
@@ -1558,6 +1665,7 @@ async function loadAll(): Promise<void> {
     const comment = toComment(raw);
     comments.set(comment.id, comment);
   }
+  renderRepoSwitcher(toList(repoPayload, "repos").map(toRepo));
   renderAll();
   if (!hasFitted && frames.size > 0) {
     hasFitted = true;
@@ -1737,8 +1845,12 @@ function subscribe(): void {
     });
   };
 
+  // A filtered view stays filtered: frames on another canvas are dropped rather than rendered.
+  // (The 5s reconcile refetches with the same scope, so nothing leaks in through that path either.)
   handle("frame.created", (payload) => {
-    putFrame(toFrame(unwrap(payload, "frame")));
+    const frame = toFrame(unwrap(payload, "frame"));
+    if (currentRepo !== null && frame.repo !== currentRepo) return;
+    putFrame(frame);
     renderAll();
     if (!hasFitted) {
       hasFitted = true;
@@ -1747,7 +1859,9 @@ function subscribe(): void {
   });
 
   handle("frame.updated", (payload) => {
-    putFrame(toFrame(unwrap(payload, "frame")));
+    const frame = toFrame(unwrap(payload, "frame"));
+    if (currentRepo !== null && frame.repo !== currentRepo) return;
+    putFrame(frame);
     renderAll();
   });
 
@@ -1757,14 +1871,18 @@ function subscribe(): void {
     renderAll();
   });
 
+  // Comments carry no repo, so a filtered view keys off its frame: a comment on a frame that is
+  // not in view belongs to another canvas and is ignored.
   handle("comment.created", (payload) => {
     const comment = toComment(unwrap(payload, "comment"));
+    if (currentRepo !== null && !frames.has(comment.frameId)) return;
     comments.set(comment.id, comment);
     renderAll();
   });
 
   handle("comment.updated", (payload) => {
     const comment = toComment(unwrap(payload, "comment"));
+    if (currentRepo !== null && !frames.has(comment.frameId)) return;
     comments.set(comment.id, comment);
     renderAll();
   });
@@ -1784,6 +1902,9 @@ window.addEventListener("error", (event) => {
 setTool("select");
 applyView();
 renderSidebar();
+// Reflect the canvas named in the URL before the first fetch, so a shared ?repo= link loads scoped.
+currentRepo = repoFromQuery();
+repoSwitcher.value = currentRepo ?? "";
 zoomToFit();
 loadAll().catch(fail);
 window.addEventListener("hashchange", () => {

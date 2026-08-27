@@ -178,6 +178,58 @@ describe("frames", () => {
   });
 });
 
+describe("repos", () => {
+  test("GET /api/repos lists each canvas with its frame count", async () => {
+    await post("/api/frames", { html: "<p>a</p>", repo: "repo-x", createdBy: "alice" });
+    await post("/api/frames", { html: "<p>b</p>", repo: "repo-x" });
+    await post("/api/frames", { html: "<p>c</p>", repo: "repo-y", createdBy: "bob" });
+
+    const res = await fetch(`${base}/api/repos`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const { repos } = (await res.json()) as {
+      repos: { repo: string; frameCount: number; updatedAt: string | null }[];
+    };
+    expect(repos.find((r) => r.repo === "repo-x")?.frameCount).toBe(2);
+    expect(repos.find((r) => r.repo === "repo-y")?.frameCount).toBe(1);
+  });
+
+  test("GET /api/frames?repo= scopes to one canvas, carrying repo + createdBy", async () => {
+    const res = await fetch(`${base}/api/frames?repo=repo-x`);
+    expect(res.status).toBe(200);
+    const { frames } = (await res.json()) as {
+      frames: (FrameSummary & { repo: string; createdBy: string | null })[];
+    };
+    expect(frames.length).toBe(2);
+    expect(frames.every((f) => f.repo === "repo-x")).toBe(true);
+    expect(frames.some((f) => f.createdBy === "alice")).toBe(true);
+  });
+
+  test("GET /api/comments?repo= returns only that canvas's comments", async () => {
+    const list = (await (await fetch(`${base}/api/frames?repo=repo-y`)).json()) as {
+      frames: FrameSummary[];
+    };
+    const target = list.frames[0];
+    if (target === undefined) throw new Error("repo-y has no frame to comment on");
+    await createComment(target.id, "scoped comment");
+
+    const scoped = (await (
+      await fetch(`${base}/api/comments?repo=repo-y&includeResolved=true`)
+    ).json()) as { comments: Comment[] };
+    expect(scoped.comments.some((c) => c.text === "scoped comment")).toBe(true);
+
+    const elsewhere = (await (
+      await fetch(`${base}/api/comments?repo=repo-x&includeResolved=true`)
+    ).json()) as { comments: Comment[] };
+    expect(elsewhere.comments.some((c) => c.text === "scoped comment")).toBe(false);
+  });
+
+  test("only GET is allowed on /api/repos", async () => {
+    const res = await post("/api/repos", {});
+    expect(res.status).toBe(405);
+  });
+});
+
 describe("GET /f/:id", () => {
   test("serves a fragment wrapped in a minimal document", async () => {
     const frame = await createFrame("<h1>fragment</h1>");
