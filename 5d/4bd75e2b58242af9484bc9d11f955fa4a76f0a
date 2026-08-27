@@ -1,0 +1,51 @@
+web/index.html
+  s_7adfa64874e58c::t_dbfb31546b0546 16-19
+web/style.css
+  s_7adfa64874e58c::t_52c947f00c7c73 304-346
+  s_7adfa64874e58c::t_9cb8b747716401 659-670
+test/http.test.ts
+  s_7adfa64874e58c::t_2cdcbf8f914670 181-232
+web/canvas.ts
+  s_7adfa64874e58c::t_ce9ba352ec1c12 1905-1907
+  s_7adfa64874e58c::t_bd017ec41d082a 100,1218-1282
+  s_7adfa64874e58c::t_83622822c0bdf9 92-93,97-99
+  s_7adfa64874e58c::t_8801d45958deb4 1874-1875,1878,1885
+  s_7adfa64874e58c::t_f4f06f80f4da6b 535
+  s_7adfa64874e58c::t_9bf43fb72cc4d6 663-666
+  s_7adfa64874e58c::t_cc532577aebcc8 1651-1658,1668
+  s_7adfa64874e58c::t_be3200d1645380 563-566,574
+  s_7adfa64874e58c::t_dd1277c3b0a4f4 26-29,32-33
+  s_7adfa64874e58c::t_2347cf6a22c186 211
+  s_7adfa64874e58c::t_7e4c7a5867d813 232-237
+  s_7adfa64874e58c::t_110208c90f68c7 635
+  s_7adfa64874e58c::t_91cc6807fd8a2b 1848-1849,1851-1853,1862-1864
+  s_7adfa64874e58c::t_c8fcdcb4fbad52 75-81
+  s_a2f3b663bf4f58::t_da51c73ff5fc8c 34,101
+src/http.ts
+  s_7adfa64874e58c::t_1867c61b40049e 187-191
+  s_7adfa64874e58c::t_e545f0da7acf7a 267-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "5d4bd75e2b58242af9484bc9d11f955fa4a76f0a",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    },
+    "s_a2f3b663bf4f58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3da634b8-8eb7-4e20-b93f-b1bac7fd190b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
