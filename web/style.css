@@ -625,8 +625,8 @@ code {
   position: absolute;
   bottom: 100%;
   left: 0;
-  transform-origin: 0 100%;
-  transform: scale(var(--inv));
+  /* The title scales with the frame like the rest of the drawing — no counter-scale. Keeping it a
+     constant screen size made it balloon and overlap neighbours when zoomed out. */
   display: flex;
   align-items: baseline;
   gap: 8px;
