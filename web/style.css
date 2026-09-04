@@ -774,7 +774,11 @@ code {
   height: 100%;
   border: 0;
   border-radius: 3px;
-  background: #fff;
+  /* Match the canvas paper, not hardcoded white — otherwise a page that doesn't paint full-width
+     (or a scrollbar gutter) flashes a white strip against dark content in dark mode. */
+  background: var(--sketch-paper);
+  /* Hint the frame's own scrollbars to follow the theme so a dark page doesn't get a white track. */
+  color-scheme: light dark;
 }
 
 /* transparent capture layer above the iframe and the sketch stroke */
