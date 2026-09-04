@@ -216,6 +216,19 @@ const frames = new Map<string, CanvasFrame>();
 const frameOrder: string[] = [];
 const comments = new Map<string, CanvasComment>();
 
+/**
+ * Where each frame's content is scrolled, in content px, as reported by the frame's bridge
+ * (see ESCAPE_BRIDGE in src/http.ts). Comment x/y are stored as CONTENT coords, so a pin renders
+ * at frame-local `(x − scroll.x, y − scroll.y)`. A frame that has never reported defaults to
+ * {0,0}: existing comments were placed at scroll 0, so their stored coords already ARE content
+ * coords and render exactly where they always have — no migration needed.
+ */
+const frameScroll = new Map<string, Point>();
+
+function frameScrollOf(frameId: string): Point {
+  return frameScroll.get(frameId) ?? { x: 0, y: 0 };
+}
+
 const view = { x: 0, y: 0, scale: 1 };
 
 /**
@@ -254,6 +267,7 @@ function putFrame(frame: CanvasFrame): void {
 
 function dropFrame(id: string): void {
   frames.delete(id);
+  frameScroll.delete(id);
   const at = frameOrder.indexOf(id);
   if (at >= 0) frameOrder.splice(at, 1);
   for (const comment of [...comments.values()]) {
@@ -588,7 +602,10 @@ function buildFrame(frame: CanvasFrame): FrameNode {
     const current = frames.get(frame.id);
     if (!current) throw new Error(`click on a frame that is no longer in state: ${frame.id}`);
     const point = screenToWorld(stagePoint(event));
-    openComposer(current.id, point.x - current.x, point.y - current.y);
+    // The click is a frame-local position; add the frame's current scroll so the pin is stored
+    // against the CONTENT under the cursor, not the frame window.
+    const scroll = frameScrollOf(current.id);
+    openComposer(current.id, point.x - current.x + scroll.x, point.y - current.y + scroll.y);
     setTool("select");
   });
   catcher.addEventListener("click", () => {
@@ -750,16 +767,35 @@ function makePin(frameLocalX: number, frameLocalY: number): HTMLDivElement {
   return anchor;
 }
 
+// A few px of slack so a pin sitting exactly on the frame edge is not clipped away.
+const PIN_MARGIN = 6;
+
+/** A frame-local point is visible when it lands within the frame window (plus a small margin). */
+function localVisible(frame: CanvasFrame, localX: number, localY: number): boolean {
+  return (
+    localX >= -PIN_MARGIN &&
+    localY >= -PIN_MARGIN &&
+    localX <= frame.width + PIN_MARGIN &&
+    localY <= frame.height + PIN_MARGIN
+  );
+}
+
 function renderPins(): void {
   for (const frame of orderedFrames()) {
     const node = frameNodes.get(frame.id);
     if (!node) continue;
     node.pins.replaceChildren();
+    // Pins are stored in content coords; render them at frame-local = content − scroll so they
+    // ride the content as it scrolls, and hide the ones that have scrolled out of the window.
+    const scroll = frameScrollOf(frame.id);
     const numbers = pinNumbers(frame.id);
     for (const comment of rootComments(frame.id)) {
       const number = numbers.get(comment.id);
       if (number === undefined) throw new Error(`no pin number for ${comment.id}`);
-      const anchor = makePin(comment.x, comment.y);
+      const localX = comment.x - scroll.x;
+      const localY = comment.y - scroll.y;
+      const anchor = makePin(localX, localY);
+      anchor.hidden = !localVisible(frame, localX, localY);
       const pin = document.createElement("button");
       pin.type = "button";
       pin.className = "pin";
@@ -782,7 +818,7 @@ function renderPins(): void {
       node.pins.appendChild(anchor);
     }
     if (ghost && ghost.frameId === frame.id) {
-      const anchor = makePin(ghost.x, ghost.y);
+      const anchor = makePin(ghost.x - scroll.x, ghost.y - scroll.y);
       const pin = document.createElement("div");
       pin.className = "pin is-ghost";
       pin.textContent = String(rootComments(frame.id).length + 1);
@@ -820,7 +856,11 @@ function positionPanel(): void {
     closePanel();
     return;
   }
-  const anchor = worldToScreen(frame.x + panel.localX, frame.y + panel.localY);
+  // panel.localX/localY are content coords (they anchor on a comment/ghost pin), so subtract the
+  // frame's scroll to get the frame-local point before mapping through the world transform. If the
+  // anchor has scrolled out of the window the panel just clamps to the viewport edge below.
+  const scroll = frameScrollOf(panel.frameId);
+  const anchor = worldToScreen(frame.x + panel.localX - scroll.x, frame.y + panel.localY - scroll.y);
   const { width, height } = stageSize();
   const w = panel.root.offsetWidth;
   const h = panel.root.offsetHeight;
@@ -848,13 +888,16 @@ function composerBox(placeholder: string, submit: (text: string) => void): {
   return { wrap, input };
 }
 
-function openComposer(frameId: string, localX: number, localY: number): void {
+function openComposer(frameId: string, contentX: number, contentY: number): void {
   const frame = frames.get(frameId);
   if (!frame) throw new Error(`unknown frame: ${frameId}`);
   closePanel();
 
-  const x = clamp(localX, 0, frame.width);
-  const y = clamp(localY, 0, frame.height);
+  // contentX/contentY are content coords. The click lands inside the frame window, so clamp to the
+  // content span the window currently shows — [scroll, scroll + size] — not to [0, size].
+  const scroll = frameScrollOf(frameId);
+  const x = clamp(contentX, scroll.x, scroll.x + frame.width);
+  const y = clamp(contentY, scroll.y, scroll.y + frame.height);
   ghost = { frameId, x, y };
 
   const root = document.createElement("div");
@@ -1107,7 +1150,9 @@ function renderSidebar(): void {
       entry.addEventListener("click", () => {
         const target = frames.get(comment.frameId);
         if (!target) throw new Error(`unknown frame: ${comment.frameId}`);
-        panTo(target.x + comment.x, target.y + comment.y, Math.max(view.scale, 0.7));
+        // comment.x/y are content coords; pan to where the pin currently sits (content − scroll).
+        const scroll = frameScrollOf(comment.frameId);
+        panTo(target.x + comment.x - scroll.x, target.y + comment.y - scroll.y, Math.max(view.scale, 0.7));
         openThread(comment.id);
       });
       commentList.appendChild(entry);
@@ -1706,14 +1751,39 @@ function reconcile(): void {
 function listenForFrameEscape(): void {
   window.addEventListener("message", (event) => {
     const data = event.data;
-    if (!isRecord(data) || data["__tracepaper"] !== "escape") return;
-    for (const [id, node] of frameNodes) {
-      if (node.iframe.contentWindow === event.source) {
-        if (interactiveFrameId === id) setInteractive(null);
-        return;
-      }
+    if (!isRecord(data)) return;
+    const kind = data["__tracepaper"];
+    if (kind !== "escape" && kind !== "scroll") return;
+
+    // Identity by source window, same as escape: the frame's origin is the opaque string "null",
+    // so event.origin is useless; matching event.source against an iframe we created is the only
+    // thing nothing outside the canvas can forge. A message from no known frame is ignored.
+    const id = frameForSource(event.source);
+    if (id === null) return;
+
+    if (kind === "escape") {
+      if (interactiveFrameId === id) setInteractive(null);
+      return;
     }
+
+    // scroll: record the frame's content scroll and re-place just this frame's pins (and, if it
+    // owns the open thread/composer, that panel too) so they track the content under it.
+    const x = num(data, "x", "scroll message");
+    const y = num(data, "y", "scroll message");
+    const previous = frameScrollOf(id);
+    if (previous.x === x && previous.y === y) return;
+    frameScroll.set(id, { x, y });
+    renderPins();
+    if (panel && panel.frameId === id) positionPanel();
   });
+}
+
+/** The id of the frame whose iframe raised this message, or null when the source is not one of ours. */
+function frameForSource(source: MessageEventSource | null): string | null {
+  for (const [id, node] of frameNodes) {
+    if (node.iframe.contentWindow === source) return id;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- sharing

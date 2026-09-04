@@ -258,6 +258,10 @@ describe("GET /f/:id", () => {
     expect(served).toContain("__tracepaper");
     expect(served.indexOf("__tracepaper")).toBeGreaterThan(served.indexOf("ok"));
     expect(served.indexOf("__tracepaper")).toBeLessThan(served.indexOf("</body>"));
+    // The bridge also reports scroll so pins can anchor to content, not the frame window.
+    expect(served).toContain("scroll");
+    expect(served).toContain("scrollX");
+    expect(served).toContain("scrollY");
   });
 
   test("a document with no body tag still gets the escape bridge", async () => {

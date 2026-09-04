@@ -470,13 +470,18 @@ async function handleStatic(ctx: Context, path: string): Promise<Response> {
 
 /** Fragments get a minimal wrapper so links escape the sandboxed iframe; documents pass through. */
 /**
- * Escape cannot leave an interactive frame on its own: the frame is a cross-origin sandbox, so
- * once focus is inside it every keystroke belongs to that document and the canvas never sees one.
- * This is the only channel back — a sandboxed frame may still postMessage to its parent — so the
- * frame reports the keypress and the canvas acts on it.
+ * The frame → canvas bridge, the only channel out of a sandboxed cross-origin frame. It does two
+ * jobs, both of which the canvas cannot do from the outside:
+ *
+ *  - Escape cannot leave an interactive frame on its own: once focus is inside the frame every
+ *    keystroke belongs to that document and the canvas never sees one, so the frame reports the
+ *    keypress and the canvas acts on it.
+ *  - The parent cannot read a cross-origin frame's scroll, so comment pins would drift off the
+ *    content they annotate as the user scrolls. The frame reports its scroll (on load and on each
+ *    scroll, rAF-throttled to one message per frame) so the canvas can keep pins on the content.
  *
  * Appended to every served frame, including full documents the agent authored. It touches nothing
- * else: one listener, no globals, and it is inert outside an iframe.
+ * else: two listeners, no globals, and it is inert outside an iframe.
  */
 const ESCAPE_BRIDGE = `<script>
 (function(){
@@ -484,6 +489,17 @@ const ESCAPE_BRIDGE = `<script>
   addEventListener("keydown", function (e) {
     if (e.key === "Escape") parent.postMessage({ __tracepaper: "escape" }, "*");
   }, true);
+  var queued = false;
+  function report(){
+    queued = false;
+    parent.postMessage({ __tracepaper: "scroll", x: window.scrollX, y: window.scrollY }, "*");
+  }
+  addEventListener("scroll", function(){
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(report);
+  }, true);
+  report();
 })();
 </script>`;
 
