@@ -1,6 +1,6 @@
 {
   "name": "tracepaper",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "bin": {
     "tracepaper": "bin/tracepaper.mjs"
