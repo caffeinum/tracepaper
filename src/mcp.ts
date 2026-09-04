@@ -32,7 +32,7 @@ import {
 } from "./types.ts";
 
 export const SERVER_NAME = "tracepaper";
-export const SERVER_VERSION = "0.7.3";
+export const SERVER_VERSION = "0.8.0";
 
 export type McpServerDeps = {
   store: Store;
