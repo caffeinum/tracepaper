@@ -731,8 +731,11 @@ function buildSectionFrame(frame: CanvasFrame): SectionFrameNode {
   body.className = "section-body";
   // The interior is click-through so frames inside the region stay interactive; see CSS.
 
+  // A section is the hand-drawn OUTLINE only — no paper fill. The fill pass is the frame's opaque
+  // backing; on a big section it reads as a solid panel that hides the grid and the frames behind
+  // it. The outline alone defines the grouped region; grid and frames show through.
   const parts = buildSketch(hashId(frame.id));
-  body.append(parts.sketchFill, parts.sketch);
+  body.append(parts.sketch);
 
   const label = document.createElement("span");
   label.className = "section-label";
