@@ -356,6 +356,7 @@ function applyView(): void {
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
   positionPanel();
+  updateFrameLoading();
 }
 
 /** Zoom about a stage-space anchor so the world point under it stays put. */
@@ -598,6 +599,11 @@ type HtmlFrameNode = SketchParts & {
   iframe: HTMLIFrameElement;
   pins: HTMLDivElement;
   version: number;
+  /** The `/f/:id?v=…` this frame WANTS to show; only loaded into the iframe when it's on screen and
+   *  big enough (see updateFrameLoading), so a canvas of many frames never renders them all at once. */
+  desiredSrc: string;
+  /** Whether the iframe currently holds its content (vs. blanked to free memory). */
+  loaded: boolean;
 };
 
 /** A title/label block (kind "text") — bare handwritten text drawn on the world, no box or chrome. */
@@ -701,7 +707,7 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   // above so clicks and pins stay on top. The sketch SVGs are pointer-events:none via CSS.
   body.append(parts.sketchFill, iframe, parts.sketch, catcher, pins);
   root.append(label, body, hint);
-  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, body, iframe, pins, version: -1, ...parts };
+  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, body, iframe, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
   // Clip the iframe to the wobbly outline so its straight edges never poke past the drawn line.
   const p1 = paintSketch(node, frame.width, frame.height);
   node.iframe.style.clipPath = `path('${p1}')`;
@@ -798,7 +804,9 @@ function renderFrames(): void {
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
     if (node.version !== frame.version) {
       node.version = frame.version;
-      node.iframe.src = `/f/${frame.id}?v=${frame.version}`;
+      node.desiredSrc = `/f/${frame.id}?v=${frame.version}`;
+      // Refresh live only if the iframe is currently loaded; otherwise it loads lazily below.
+      if (node.loaded) node.iframe.src = node.desiredSrc;
     }
   }
   for (const [id, node] of [...frameNodes]) {
@@ -807,6 +815,39 @@ function renderFrames(): void {
     frameNodes.delete(id);
   }
   emptyState.hidden = frames.size > 0;
+  updateFrameLoading();
+}
+
+// A frame's iframe is a full live document; rendering every frame's at once (a big board zoomed to
+// fit) exhausts memory and crashes mobile browsers. So an iframe is only loaded when the frame is
+// actually visible AND big enough to read, and is blanked again when it shrinks or scrolls away.
+const LOAD_MIN_PX = 160; // load once the frame is at least this wide on screen
+const UNLOAD_MAX_PX = 90; // …and blank it again below this — the gap is hysteresis, so a frame
+//                           hovering at the threshold doesn't thrash between load and unload.
+
+function updateFrameLoading(): void {
+  const { width: sw, height: sh } = stageSize();
+  const margin = Math.max(sw, sh) * 0.5; // keep frames a half-screen out of view warm for panning
+  for (const [id, node] of frameNodes) {
+    if (node.kind !== "html" || node.desiredSrc === "") continue;
+    const frame = frames.get(id);
+    if (!frame) continue;
+    const screenW = frame.width * view.scale;
+    const tl = worldToScreen(frame.x, frame.y);
+    const onScreen =
+      tl.x < sw + margin &&
+      tl.x + screenW > -margin &&
+      tl.y < sh + margin &&
+      tl.y + frame.height * view.scale > -margin;
+    const want = node.loaded ? onScreen && screenW >= UNLOAD_MAX_PX : onScreen && screenW >= LOAD_MIN_PX;
+    if (want && !node.loaded) {
+      node.iframe.src = node.desiredSrc;
+      node.loaded = true;
+    } else if (!want && node.loaded) {
+      node.iframe.removeAttribute("src"); // navigates to about:blank, freeing the document's memory
+      node.loaded = false;
+    }
+  }
 }
 
 /**
