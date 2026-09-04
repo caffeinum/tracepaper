@@ -1,0 +1,28 @@
+src/mcp.ts
+  s_7adfa64874e58c::t_33d0dcb7a6a6dc 334
+  s_7adfa64874e58c::t_7cac1e8854ba97 194-203
+  s_7adfa64874e58c::t_f470023646dae6 254
+  s_7adfa64874e58c::t_64e13d1235b8bd 420
+  s_7adfa64874e58c::t_178d6bcea8dd0a 297
+  s_7adfa64874e58c::t_9f18136c5dcb52 35
+src/store.ts
+  s_7adfa64874e58c::t_7b302da4e7d97d 417-430
+package.json
+  s_7adfa64874e58c::t_78fdbf29c2a27d 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0290a33096e4bf4d1c93cf6a7ba6caf35cf8ba05",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
