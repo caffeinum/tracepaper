@@ -153,3 +153,77 @@ export async function renderPng(opts: RenderPngOptions): Promise<Uint8Array> {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Render-through cache
+//
+// Rendering a PNG spawns a headless Chrome — far too costly to do on every
+// request when a mobile board fires one thumbnail fetch per frame on load. So:
+//   - cache the finished bytes per frame, keyed by id, overwritten when the
+//     frame's version changes (an edited frame re-renders, nothing stale);
+//   - de-dupe in-flight renders of the same id+version so 60 parallel requests
+//     for one frame spawn a single Chrome, not sixty;
+//   - cap concurrent renders with a small semaphore so a burst of distinct
+//     thumbnails cannot fork a Chrome per frame at once.
+// In-memory only — the canvas re-fetches on reload, so a cold cache costs one
+// render, not correctness.
+
+type CacheEntry = { version: number; bytes: Uint8Array };
+
+const pngCache = new Map<string, CacheEntry>();
+const inFlight = new Map<string, Promise<Uint8Array>>();
+
+/** Most Chromes we let render at once; further requests await a slot. */
+export const MAX_CONCURRENT_RENDERS = 3;
+let activeRenders = 0;
+const renderQueue: Array<() => void> = [];
+
+function acquireSlot(): Promise<void> {
+  if (activeRenders < MAX_CONCURRENT_RENDERS) {
+    activeRenders++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => renderQueue.push(resolve));
+}
+
+function releaseSlot(): void {
+  const next = renderQueue.shift();
+  // Hand the slot straight to the next waiter (count unchanged) or free it.
+  if (next !== undefined) next();
+  else activeRenders--;
+}
+
+export type RenderFn = () => Promise<Uint8Array>;
+
+/**
+ * Return cached PNG bytes for `frameId` at `version`, else render once through
+ * `render`, store, and return. Concurrent callers for the same id+version share
+ * one render; overall concurrency is capped by the semaphore above. A failed
+ * render caches nothing and rejects every sharer.
+ */
+export async function renderCached(
+  frameId: string,
+  version: number,
+  render: RenderFn,
+): Promise<Uint8Array> {
+  const cached = pngCache.get(frameId);
+  if (cached !== undefined && cached.version === version) return cached.bytes;
+
+  const key = `${frameId}@${version}`;
+  const existing = inFlight.get(key);
+  if (existing !== undefined) return existing;
+
+  const promise = (async () => {
+    await acquireSlot();
+    try {
+      const bytes = await render();
+      pngCache.set(frameId, { version, bytes });
+      return bytes;
+    } finally {
+      releaseSlot();
+      inFlight.delete(key);
+    }
+  })();
+  inFlight.set(key, promise);
+  return promise;
+}

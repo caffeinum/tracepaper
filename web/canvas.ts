@@ -356,7 +356,7 @@ function applyView(): void {
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
   positionPanel();
-  updateFrameLoading();
+  updateFrameDetail();
 }
 
 /** Zoom about a stage-space anchor so the world point under it stays put. */
@@ -598,12 +598,15 @@ type HtmlFrameNode = SketchParts & {
   save: HTMLAnchorElement;
   body: HTMLDivElement;
   iframe: HTMLIFrameElement;
+  /** A lightweight PNG of the frame (`/f/:id.png?v=…`), shown by default so a big board never loads
+   *  dozens of live documents at once. The iframe goes live only for the frame you zoom into. */
+  thumb: HTMLImageElement;
   pins: HTMLDivElement;
   version: number;
-  /** The `/f/:id?v=…` this frame WANTS to show; only loaded into the iframe when it's on screen and
-   *  big enough (see updateFrameLoading), so a canvas of many frames never renders them all at once. */
+  /** The `/f/:id?v=…` this frame WANTS to show; only loaded into the iframe when the frame covers
+   *  more than half the viewport (see updateFrameDetail), so at most ~1 live iframe exists at once. */
   desiredSrc: string;
-  /** Whether the iframe currently holds its content (vs. blanked to free memory). */
+  /** Whether the iframe currently holds its content (vs. blanked to the thumbnail to free memory). */
   loaded: boolean;
 };
 
@@ -672,6 +675,17 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-popups");
   iframe.setAttribute("loading", "eager");
   iframe.title = frame.name;
+  // Hidden until this frame is the one zoomed into: a blanked iframe still paints its opaque paper
+  // background, which would cover the thumbnail, so it must not render while the thumb is showing.
+  iframe.hidden = true;
+
+  // The default view of every frame: a static PNG. loading="lazy" keeps off-screen frames from
+  // fetching until near the viewport, so a big board never even downloads all of them at once.
+  const thumb = document.createElement("img");
+  thumb.className = "frame-thumb";
+  thumb.loading = "lazy";
+  thumb.decoding = "async";
+  thumb.alt = "";
 
   const catcher = document.createElement("div");
   catcher.className = "frame-catch";
@@ -715,12 +729,15 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
 
   // sketchFill behind the iframe (paper), sketch (ink) above it; catcher and pins keep their order
   // above so clicks and pins stay on top. The sketch SVGs are pointer-events:none via CSS.
-  body.append(parts.sketchFill, iframe, parts.sketch, catcher, pins);
+  // thumb and iframe share the same layer (below the ink outline, catcher and pins); the iframe sits
+  // later in the DOM so it paints over the thumb during the brief overlap while it loads.
+  body.append(parts.sketchFill, thumb, iframe, parts.sketch, catcher, pins);
   root.append(label, body, hint);
-  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, save, body, iframe, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
-  // Clip the iframe to the wobbly outline so its straight edges never poke past the drawn line.
+  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, save, body, iframe, thumb, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
+  // Clip both the iframe and the thumb to the wobbly outline so straight edges never poke past it.
   const p1 = paintSketch(node, frame.width, frame.height);
   node.iframe.style.clipPath = `path('${p1}')`;
+  node.thumb.style.clipPath = `path('${p1}')`;
   return node;
 }
 
@@ -804,6 +821,7 @@ function renderFrames(): void {
     if (node.sketchW !== frame.width || node.sketchH !== frame.height) {
       const p1 = paintSketch(node, frame.width, frame.height);
       node.iframe.style.clipPath = `path('${p1}')`;
+      node.thumb.style.clipPath = `path('${p1}')`;
     }
     node.name.textContent = frame.name;
     node.dims.textContent = `${Math.round(frame.width)} × ${Math.round(frame.height)}`;
@@ -819,7 +837,11 @@ function renderFrames(): void {
     if (node.version !== frame.version) {
       node.version = frame.version;
       node.desiredSrc = `/f/${frame.id}?v=${frame.version}`;
-      // Refresh live only if the iframe is currently loaded; otherwise it loads lazily below.
+      // The thumbnail is content-addressed by version, so a new version fetches a fresh PNG (and the
+      // browser caches each version immutably). loading="lazy" defers off-screen fetches.
+      node.thumb.src = `/f/${frame.id}.png?v=${frame.version}`;
+      // Refresh the live iframe only if it's currently the dominant frame; otherwise it stays on the
+      // thumbnail and goes live (at the new version) when zoomed into.
       if (node.loaded) node.iframe.src = node.desiredSrc;
     }
   }
@@ -829,36 +851,47 @@ function renderFrames(): void {
     frameNodes.delete(id);
   }
   emptyState.hidden = frames.size > 0;
-  updateFrameLoading();
+  updateFrameDetail();
 }
 
-// A frame's iframe is a full live document; rendering every frame's at once (a big board zoomed to
-// fit) exhausts memory and crashes mobile browsers. So an iframe is only loaded when the frame is
-// actually visible AND big enough to read, and is blanked again when it shrinks or scrolls away.
-const LOAD_MIN_PX = 160; // load once the frame is at least this wide on screen
-const UNLOAD_MAX_PX = 90; // …and blank it again below this — the gap is hysteresis, so a frame
-//                           hovering at the threshold doesn't thrash between load and unload.
+// A frame's iframe is a full live document; loading every frame's at once (a big board zoomed to
+// fit) exhausts memory and crashes mobile browsers. So every frame shows a lightweight PNG thumbnail
+// by default, and exactly the frame you have zoomed into — the one covering more than half the
+// viewport — swaps to a live iframe for interaction, reverting to the thumb when you zoom back out.
+// Because only one frame can fill more than half the viewport at a time, at most ~1 iframe is ever
+// live, whatever the zoom — so a mid-zoom that used to load several iframes at once no longer can.
+const DOMINANT_COVERAGE = 0.5;
 
-function updateFrameLoading(): void {
+function updateFrameDetail(): void {
   const { width: sw, height: sh } = stageSize();
-  const margin = Math.max(sw, sh) * 0.5; // keep frames a half-screen out of view warm for panning
+  const stageArea = sw * sh;
+  if (stageArea <= 0) return;
   for (const [id, node] of frameNodes) {
     if (node.kind !== "html" || node.desiredSrc === "") continue;
     const frame = frames.get(id);
     if (!frame) continue;
-    const screenW = frame.width * view.scale;
+    // The frame's on-screen rectangle (world corners → stage px), intersected with the viewport.
     const tl = worldToScreen(frame.x, frame.y);
-    const onScreen =
-      tl.x < sw + margin &&
-      tl.x + screenW > -margin &&
-      tl.y < sh + margin &&
-      tl.y + frame.height * view.scale > -margin;
-    const want = node.loaded ? onScreen && screenW >= UNLOAD_MAX_PX : onScreen && screenW >= LOAD_MIN_PX;
-    if (want && !node.loaded) {
+    const br = worldToScreen(frame.x + frame.width, frame.y + frame.height);
+    const ix = Math.max(0, Math.min(br.x, sw) - Math.max(tl.x, 0));
+    const iy = Math.max(0, Math.min(br.y, sh) - Math.max(tl.y, 0));
+    const coverage = (ix * iy) / stageArea;
+    const dominant = coverage > DOMINANT_COVERAGE;
+    if (dominant && !node.loaded) {
+      // Go live. Keep the thumb visible until the iframe has actually painted, so stepping in never
+      // flashes a blank paper card.
+      node.iframe.hidden = false;
+      node.iframe.onload = () => {
+        node.thumb.hidden = true;
+      };
       node.iframe.src = node.desiredSrc;
       node.loaded = true;
-    } else if (!want && node.loaded) {
+    } else if (!dominant && node.loaded) {
+      // Revert to the thumbnail and free the live document's memory.
+      node.thumb.hidden = false;
+      node.iframe.onload = null;
       node.iframe.removeAttribute("src"); // navigates to about:blank, freeing the document's memory
+      node.iframe.hidden = true;
       node.loaded = false;
     }
   }

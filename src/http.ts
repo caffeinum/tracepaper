@@ -3,7 +3,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
-import { findChrome, renderPng } from "./screenshot.ts";
+import { findChrome, renderCached, renderPng } from "./screenshot.ts";
 import type { Store } from "./store.ts";
 import type { Tunnel } from "./tunnel.ts";
 import {
@@ -380,21 +380,32 @@ async function handleFramePng(ctx: Context, id: string, url: URL): Promise<Respo
   // headless Chrome, so the render always goes through 127.0.0.1 on the port the server bound.
   const target = `http://127.0.0.1:${ctx.port}/f/${id}`;
 
+  // Cached per frame id, keyed by version: the canvas fetches one thumbnail per frame on load and
+  // again on every pan/zoom, so re-rendering each time would fork a Chrome per request. renderCached
+  // renders once per id+version, de-dupes concurrent requests, and caps total concurrency.
   let bytes: Uint8Array;
   try {
-    bytes = await renderPng({ chrome, url: target, width: frame.width, height: frame.height });
+    bytes = await renderCached(id, frame.version, () =>
+      renderPng({ chrome, url: target, width: frame.width, height: frame.height }),
+    );
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : String(error));
   }
 
   const filename = safeFilename(frame.name, id);
   const disposition = url.searchParams.has("download") ? "attachment" : "inline";
+  // With ?v=<version> the URL is content-addressed — the version changes whenever the PNG would, so
+  // the browser can cache it forever and never re-fetch on pan/zoom. Without it, don't cache: the
+  // bytes could be for a since-edited frame.
+  const cacheControl = url.searchParams.has("v")
+    ? "public, max-age=31536000, immutable"
+    : "no-store";
   // Uint8Array is a valid BodyInit at runtime; TS's lib types only accept an ArrayBuffer-backed
   // view, so hand it the underlying buffer directly.
   return new Response(bytes.buffer as ArrayBuffer, {
     headers: {
       "content-type": "image/png",
-      "cache-control": "no-store",
+      "cache-control": cacheControl,
       "content-disposition": `${disposition}; filename="${filename}.png"`,
     },
   });

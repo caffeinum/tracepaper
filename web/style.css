@@ -814,6 +814,32 @@ code {
   color-scheme: light dark;
 }
 
+/* A blanked iframe still paints its opaque paper background; hide it outright while the thumbnail
+   is showing so it never covers the thumb. Higher specificity than `.frame iframe` above. */
+.frame iframe[hidden] {
+  display: none;
+}
+
+/* The default view of every frame: a static PNG snapshot, cheap to keep on screen by the dozen.
+   It fills the frame body on the same layer as the iframe (below the ink outline, catcher and pins),
+   clipped to the same hand-drawn edge. object-fit:fill maps the 2× PNG 1:1 onto the frame's aspect.
+   The paper background means an as-yet-unloaded thumb reads as a blank card, not a flash. */
+.frame-thumb {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  object-fit: fill;
+  background: var(--sketch-paper);
+  pointer-events: none;
+}
+
+.frame-thumb[hidden] {
+  display: none;
+}
+
 /* transparent capture layer above the iframe and the sketch stroke */
 .frame-catch {
   position: absolute;
