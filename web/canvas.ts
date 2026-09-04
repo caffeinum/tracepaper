@@ -27,6 +27,10 @@ type CanvasFrame = {
   repo: string;
   /** Who pushed the frame, shown as attribution in the "All canvases" view. Null when unknown. */
   createdBy: string | null;
+  /** "html" (iframe), "text" (title block) or "section" (outlined region). */
+  kind: "html" | "text" | "section";
+  /** World-px font size; only used by kind "text". Null otherwise. */
+  fontSize: number | null;
 };
 
 /** One canvas the switcher can offer, with its frame count. */
@@ -79,8 +83,21 @@ function strOrNull(source: Record<string, unknown>, key: string, what: string): 
   return value;
 }
 
+function numOrNull(source: Record<string, unknown>, key: string, what: string): number | null {
+  const value = source[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${what}.${key} must be a finite number or null, got ${preview(value)}`);
+  }
+  return value;
+}
+
 function toFrame(raw: unknown): CanvasFrame {
   if (!isRecord(raw)) throw new Error(`frame must be an object, got ${preview(raw)}`);
+  const kind = str(raw, "kind", "frame");
+  if (kind !== "html" && kind !== "text" && kind !== "section") {
+    throw new Error(`frame.kind must be "html", "text" or "section", got ${preview(kind)}`);
+  }
   return {
     id: str(raw, "id", "frame"),
     name: str(raw, "name", "frame"),
@@ -91,6 +108,8 @@ function toFrame(raw: unknown): CanvasFrame {
     version: num(raw, "version", "frame"),
     repo: str(raw, "repo", "frame"),
     createdBy: strOrNull(raw, "createdBy", "frame"),
+    kind,
+    fontSize: numOrNull(raw, "fontSize", "frame"),
   };
 }
 
@@ -516,41 +535,8 @@ function makePath(): SVGPathElement {
   return document.createElementNS(SVG_NS, "path");
 }
 
-/** (Re)draw a frame's outline for its current size. Seed is derived from the id, so the shape is
- *  stable across redraws and only changes when width/height change. */
-function paintSketch(node: FrameNode, w: number, h: number): void {
-  const seed = node.sketchSeed;
-  const p1 = roughRectPath(w, h, SKETCH_AMP, seed);
-  const p2 = roughRectPath(w, h, SKETCH_AMP, seed + 101);
-  const vw = w + SKETCH_PAD * 2;
-  const vh = h + SKETCH_PAD * 2;
-  const viewBox = `${-SKETCH_PAD} ${-SKETCH_PAD} ${vw} ${vh}`;
-  for (const svg of [node.sketchFill, node.sketch]) {
-    svg.setAttribute("width", String(vw));
-    svg.setAttribute("height", String(vh));
-    svg.setAttribute("viewBox", viewBox);
-  }
-  // Behind the iframe: paper fills the wobbly interior so no grid bleeds through the ragged edge.
-  node.sketchFillPath.setAttribute("d", p1);
-  // On top: the visible hand-drawn edge — one firm pass plus a fainter overlapping pass.
-  node.sketchInk1.setAttribute("d", p1);
-  node.sketchInk2.setAttribute("d", p2);
-  // Clip the iframe to the same wobbly outline so its straight edges never poke past the drawn
-  // line at an inward dent (most visible in dark mode, where the white frame contrasts the ground).
-  node.iframe.style.clipPath = `path('${p1}')`;
-  node.sketchW = w;
-  node.sketchH = h;
-}
-
-type FrameNode = {
-  root: HTMLDivElement;
-  name: HTMLSpanElement;
-  dims: HTMLSpanElement;
-  by: HTMLSpanElement;
-  body: HTMLDivElement;
-  iframe: HTMLIFrameElement;
-  pins: HTMLDivElement;
-  version: number;
+/** The hand-drawn outline layers, shared by html frames and sections. */
+type SketchParts = {
   sketchSeed: number;
   sketchFill: SVGSVGElement;
   sketch: SVGSVGElement;
@@ -561,9 +547,85 @@ type FrameNode = {
   sketchH: number;
 };
 
+/** Builds the two SVG passes (paper fill behind, ink edge on top) for a wobbly outline. */
+function buildSketch(seed: number): SketchParts {
+  const sketchFill = makeSvg("frame-sketch-fill");
+  const sketchFillPath = makePath();
+  sketchFill.appendChild(sketchFillPath);
+
+  const sketch = makeSvg("frame-sketch");
+  const sketchInk1 = makePath();
+  sketchInk1.setAttribute("class", "ink-1");
+  const sketchInk2 = makePath();
+  sketchInk2.setAttribute("class", "ink-2");
+  sketch.append(sketchInk1, sketchInk2);
+
+  return { sketchSeed: seed, sketchFill, sketch, sketchFillPath, sketchInk1, sketchInk2, sketchW: -1, sketchH: -1 };
+}
+
+/** (Re)draw an outline for its current size and return the fill path `d` (used to clip the iframe).
+ *  Seed is derived from the id, so the shape is stable across redraws and only changes with size. */
+function paintSketch(parts: SketchParts, w: number, h: number): string {
+  const seed = parts.sketchSeed;
+  const p1 = roughRectPath(w, h, SKETCH_AMP, seed);
+  const p2 = roughRectPath(w, h, SKETCH_AMP, seed + 101);
+  const vw = w + SKETCH_PAD * 2;
+  const vh = h + SKETCH_PAD * 2;
+  const viewBox = `${-SKETCH_PAD} ${-SKETCH_PAD} ${vw} ${vh}`;
+  for (const svg of [parts.sketchFill, parts.sketch]) {
+    svg.setAttribute("width", String(vw));
+    svg.setAttribute("height", String(vh));
+    svg.setAttribute("viewBox", viewBox);
+  }
+  // Behind the body: paper (html) / faint tint (section) fills the wobbly interior.
+  parts.sketchFillPath.setAttribute("d", p1);
+  // On top: the visible hand-drawn edge — one firm pass plus a fainter overlapping pass.
+  parts.sketchInk1.setAttribute("d", p1);
+  parts.sketchInk2.setAttribute("d", p2);
+  parts.sketchW = w;
+  parts.sketchH = h;
+  return p1;
+}
+
+/** An iframe frame (kind "html") — the original card with sketch outline, label, pins and comments. */
+type HtmlFrameNode = SketchParts & {
+  kind: "html";
+  root: HTMLDivElement;
+  name: HTMLSpanElement;
+  dims: HTMLSpanElement;
+  by: HTMLSpanElement;
+  body: HTMLDivElement;
+  iframe: HTMLIFrameElement;
+  pins: HTMLDivElement;
+  version: number;
+};
+
+/** A title/label block (kind "text") — bare handwritten text drawn on the world, no box or chrome. */
+type TextFrameNode = {
+  kind: "text";
+  root: HTMLDivElement;
+  text: HTMLDivElement;
+};
+
+/** A named outlined region (kind "section") — a hand-drawn box behind frames, with a label. */
+type SectionFrameNode = SketchParts & {
+  kind: "section";
+  root: HTMLDivElement;
+  body: HTMLDivElement;
+  label: HTMLSpanElement;
+};
+
+type FrameNode = HtmlFrameNode | TextFrameNode | SectionFrameNode;
+
 const frameNodes = new Map<string, FrameNode>();
 
 function buildFrame(frame: CanvasFrame): FrameNode {
+  if (frame.kind === "text") return buildTextFrame(frame);
+  if (frame.kind === "section") return buildSectionFrame(frame);
+  return buildHtmlFrame(frame);
+}
+
+function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   const root = document.createElement("div");
   root.className = "frame";
   root.dataset["frameId"] = frame.id;
@@ -621,16 +683,7 @@ function buildFrame(frame: CanvasFrame): FrameNode {
   // Two SVG passes for the hand-drawn edge. The fill pass sits behind the iframe (paper backing so
   // the ragged edge shows no grid); the ink pass sits above it. Stroke colour comes from CSS
   // (--sketch-ink) so selection/interactive state can recolour it to the accent.
-  const sketchFill = makeSvg("frame-sketch-fill");
-  const sketchFillPath = makePath();
-  sketchFill.appendChild(sketchFillPath);
-
-  const sketch = makeSvg("frame-sketch");
-  const sketchInk1 = makePath();
-  sketchInk1.setAttribute("class", "ink-1");
-  const sketchInk2 = makePath();
-  sketchInk2.setAttribute("class", "ink-2");
-  sketch.append(sketchInk1, sketchInk2);
+  const parts = buildSketch(hashId(frame.id));
 
   const pins = document.createElement("div");
   pins.className = "pins";
@@ -646,14 +699,48 @@ function buildFrame(frame: CanvasFrame): FrameNode {
 
   // sketchFill behind the iframe (paper), sketch (ink) above it; catcher and pins keep their order
   // above so clicks and pins stay on top. The sketch SVGs are pointer-events:none via CSS.
-  body.append(sketchFill, iframe, sketch, catcher, pins);
+  body.append(parts.sketchFill, iframe, parts.sketch, catcher, pins);
   root.append(label, body, hint);
-  const node: FrameNode = {
-    root, name, dims, by, body, iframe, pins, version: -1,
-    sketchSeed: hashId(frame.id),
-    sketchFill, sketch, sketchFillPath, sketchInk1, sketchInk2,
-    sketchW: -1, sketchH: -1,
-  };
+  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, body, iframe, pins, version: -1, ...parts };
+  // Clip the iframe to the wobbly outline so its straight edges never poke past the drawn line.
+  const p1 = paintSketch(node, frame.width, frame.height);
+  node.iframe.style.clipPath = `path('${p1}')`;
+  return node;
+}
+
+function buildTextFrame(frame: CanvasFrame): TextFrameNode {
+  const root = document.createElement("div");
+  root.className = "frame frame-text";
+  root.dataset["frameId"] = frame.id;
+
+  const text = document.createElement("div");
+  text.className = "text-block";
+  // The whole block is the drag handle: pointerdown selects it and a drag moves it (makeDraggable).
+  makeDraggable(text, frame.id);
+
+  root.appendChild(text);
+  return { kind: "text", root, text };
+}
+
+function buildSectionFrame(frame: CanvasFrame): SectionFrameNode {
+  const root = document.createElement("div");
+  root.className = "frame frame-section";
+  root.dataset["frameId"] = frame.id;
+
+  const body = document.createElement("div");
+  body.className = "section-body";
+  // The interior is click-through so frames inside the region stay interactive; see CSS.
+
+  const parts = buildSketch(hashId(frame.id));
+  body.append(parts.sketchFill, parts.sketch);
+
+  const label = document.createElement("span");
+  label.className = "section-label";
+  // The label is the only interactive part: it selects and drags the section.
+  makeDraggable(label, frame.id);
+
+  root.append(body, label);
+  const node: SectionFrameNode = { kind: "section", root, body, label, ...parts };
   paintSketch(node, frame.width, frame.height);
   return node;
 }
@@ -663,17 +750,41 @@ function renderFrames(): void {
   for (const frame of orderedFrames()) {
     seen.add(frame.id);
     let node = frameNodes.get(frame.id);
+    // Kind never changes for an existing frame, but rebuild defensively if it somehow does.
+    if (node && node.kind !== frame.kind) {
+      node.root.remove();
+      frameNodes.delete(frame.id);
+      node = undefined;
+    }
     if (!node) {
       node = buildFrame(frame);
       frameNodes.set(frame.id, node);
       world.appendChild(node.root);
     }
     node.root.style.transform = `translate(${frame.x}px, ${frame.y}px)`;
+
+    if (node.kind === "text") {
+      node.text.textContent = frame.name;
+      // fontSize is world px: the text lives inside #world, so it scales with zoom like frames.
+      node.text.style.fontSize = `${frame.fontSize ?? 32}px`;
+      continue;
+    }
+    if (node.kind === "section") {
+      node.body.style.width = `${frame.width}px`;
+      node.body.style.height = `${frame.height}px`;
+      if (node.sketchW !== frame.width || node.sketchH !== frame.height) {
+        paintSketch(node, frame.width, frame.height);
+      }
+      node.label.textContent = frame.name;
+      continue;
+    }
+
     node.body.style.width = `${frame.width}px`;
     node.body.style.height = `${frame.height}px`;
     // The wobbly outline is baked for a specific size, so redraw it only when the size changes.
     if (node.sketchW !== frame.width || node.sketchH !== frame.height) {
-      paintSketch(node, frame.width, frame.height);
+      const p1 = paintSketch(node, frame.width, frame.height);
+      node.iframe.style.clipPath = `path('${p1}')`;
     }
     node.name.textContent = frame.name;
     node.dims.textContent = `${Math.round(frame.width)} × ${Math.round(frame.height)}`;
@@ -783,7 +894,8 @@ function localVisible(frame: CanvasFrame, localX: number, localY: number): boole
 function renderPins(): void {
   for (const frame of orderedFrames()) {
     const node = frameNodes.get(frame.id);
-    if (!node) continue;
+    // Only html frames carry pins/comments; text and section blocks have none.
+    if (!node || node.kind !== "html") continue;
     node.pins.replaceChildren();
     // Pins are stored in content coords; render them at frame-local = content − scroll so they
     // ride the content as it scrolls, and hide the ones that have scrolled out of the window.
@@ -1784,7 +1896,7 @@ function listenForFrameEscape(): void {
 /** The id of the frame whose iframe raised this message, or null when the source is not one of ours. */
 function frameForSource(source: MessageEventSource | null): string | null {
   for (const [id, node] of frameNodes) {
-    if (node.iframe.contentWindow === source) return id;
+    if (node.kind === "html" && node.iframe.contentWindow === source) return id;
   }
   return null;
 }

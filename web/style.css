@@ -619,6 +619,13 @@ code {
   position: absolute;
   top: 0;
   left: 0;
+  /* z-order within the world: html frames and text blocks sit at 2; sections drop to 1 (below),
+     so a section's outline reads as a backdrop and the frames it groups stay on top. */
+  z-index: 2;
+}
+
+.frame.frame-section {
+  z-index: 1;
 }
 
 .frame-label {
@@ -816,6 +823,68 @@ code {
 .frame.is-interactive .frame-hint {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* ---------- text blocks (kind "text") ---------- */
+
+/* A bare heading drawn straight on the world — no box, no chrome. It lives inside #world, so its
+   world-px font size scales with zoom like frame content (no counter-scale). */
+.text-block {
+  font-family: var(--hand);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+
+.text-block:active {
+  cursor: grabbing;
+}
+
+.frame-text.is-selected .text-block {
+  color: var(--accent);
+}
+
+/* ---------- sections (kind "section") ---------- */
+
+/* The region interior is click-through, so frames sitting inside a section stay interactive — only
+   the label (below) captures pointer events. The outline is the hand-drawn sketch, same as frames. */
+.section-body {
+  position: relative;
+  pointer-events: none;
+}
+
+/* No opaque paper fill (that would read as a panel and hide the grid) — just a faint tint so the
+   grouped region is legible behind the frames. The ink edge reuses .frame-sketch from above. */
+.frame-section .frame-sketch-fill path {
+  fill: var(--sketch-ink);
+  fill-opacity: 0.04;
+}
+
+.section-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-family: var(--hand);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--ink-2);
+  background: var(--surface-float);
+  padding: 1px 8px;
+  border-radius: 6px;
+  cursor: grab;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.section-label:active {
+  cursor: grabbing;
+}
+
+.frame-section.is-selected .section-label {
+  color: var(--accent);
 }
 
 /* ---------- pins ---------- */

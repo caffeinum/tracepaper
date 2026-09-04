@@ -285,10 +285,10 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
 
   const parsed = CreateOrUpdateFrameBodySchema.safeParse(body);
   if (!parsed.success) return badRequest(z.prettifyError(parsed.error));
-  const { html, name, frameId, width, height, x, y, repo, createdBy } = parsed.data;
+  const { html, name, frameId, width, height, x, y, repo, createdBy, kind, fontSize } = parsed.data;
 
   if (frameId !== undefined) {
-    // Updates stay on the frame's existing canvas — repo/createdBy are not touched.
+    // Updates stay on the frame's existing canvas — repo/createdBy/kind are not touched.
     const frame = ctx.store.updateFrameHtml(frameId, html, { name, width, height });
     ctx.bus.emit({ type: "frame.updated", frame: toFramePayload(frame) });
     return json(frame);
@@ -296,7 +296,7 @@ async function handleCreateOrUpdateFrame(ctx: Context): Promise<Response> {
 
   // No per-connection identity on the HTTP layer: repo/createdBy come from the body (the CLI maps
   // --repo here); repo defaults to 'default' at the store when absent.
-  const frame = ctx.store.createFrame({ html, name, width, height, x, y, repo, createdBy });
+  const frame = ctx.store.createFrame({ html, name, width, height, x, y, repo, createdBy, kind, fontSize });
   ctx.bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
   return json(frame, 201);
 }

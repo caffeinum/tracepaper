@@ -29,6 +29,8 @@ import {
 const ROOT = join(import.meta.dir, "..");
 const ENTRY = join(ROOT, "src", "index.ts");
 const TOOL_NAMES = [
+  "add_section",
+  "add_text",
   "delete_frame",
   "get_comments",
   "get_frame",

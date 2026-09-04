@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS frames (
   version   INTEGER NOT NULL,
   repo      TEXT    NOT NULL DEFAULT 'default',
   createdBy TEXT,
+  -- 'html' (iframe frame), 'text' (title block) or 'section' (outlined region). See CreateFrameInput.
+  kind      TEXT    NOT NULL DEFAULT 'html',
+  -- world-px font size, only used by kind 'text'; null otherwise.
+  fontSize  REAL,
   createdAt TEXT    NOT NULL,
   updatedAt TEXT    NOT NULL
 );
@@ -99,6 +103,8 @@ type FrameRow = {
   version: number;
   repo: string;
   createdBy: string | null;
+  kind: string;
+  fontSize: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -215,6 +221,13 @@ export class Store {
     if (!frameColumns.has("createdBy")) {
       this.db.exec("ALTER TABLE frames ADD COLUMN createdBy TEXT");
     }
+    // Pre-kind frames were all iframe frames; a NOT NULL DEFAULT backfills them to 'html' in place.
+    if (!frameColumns.has("kind")) {
+      this.db.exec("ALTER TABLE frames ADD COLUMN kind TEXT NOT NULL DEFAULT 'html'");
+    }
+    if (!frameColumns.has("fontSize")) {
+      this.db.exec("ALTER TABLE frames ADD COLUMN fontSize REAL");
+    }
 
     const columns = new Set(
       (this.db.query("PRAGMA table_info(comments)").all() as { name: string }[]).map((c) => c.name),
@@ -259,11 +272,14 @@ export class Store {
   // ---------- frames ----------
 
   createFrame(input: CreateFrameInput): Frame {
-    const { html, name, width, height, x, y, repo, createdBy } = CreateFrameInputSchema.parse(input);
+    const { html, name, width, height, x, y, repo, createdBy, kind, fontSize } =
+      CreateFrameInputSchema.parse(input);
     // The layout slot and the slot name are both read-then-written. Two processes on one db
     // otherwise pick the same x and the same "Frame N", stacking one frame invisibly on another.
     return this.db
-      .transaction(() => this.insertFrame({ html, name, width, height, x, y, repo, createdBy }))
+      .transaction(() =>
+        this.insertFrame({ html, name, width, height, x, y, repo, createdBy, kind, fontSize }),
+      )
       .immediate();
   }
 
@@ -276,8 +292,10 @@ export class Store {
     y?: number | undefined;
     repo: string;
     createdBy?: string | undefined;
+    kind: "html" | "text" | "section";
+    fontSize?: number | undefined;
   }): Frame {
-    const { html, name, width, height, repo } = input;
+    const { html, name, width, height, repo, kind } = input;
     const at = nowIso();
     // Auto-placement only considers frames in the same repo, so canvases lay out independently.
     const auto = this.nextFramePosition(width, height, repo);
@@ -292,14 +310,16 @@ export class Store {
       version: 1,
       repo,
       createdBy: input.createdBy ?? null,
+      kind,
+      fontSize: input.fontSize ?? null,
       createdAt: at,
       updatedAt: at,
     };
 
     this.db
       .query(
-        `INSERT INTO frames (id, name, html, width, height, x, y, version, repo, createdBy, createdAt, updatedAt)
-         VALUES ($id, $name, $html, $width, $height, $x, $y, $version, $repo, $createdBy, $createdAt, $updatedAt)`,
+        `INSERT INTO frames (id, name, html, width, height, x, y, version, repo, createdBy, kind, fontSize, createdAt, updatedAt)
+         VALUES ($id, $name, $html, $width, $height, $x, $y, $version, $repo, $createdBy, $kind, $fontSize, $createdAt, $updatedAt)`,
       )
       .run({
         $id: frame.id,
@@ -312,6 +332,8 @@ export class Store {
         $version: frame.version,
         $repo: frame.repo,
         $createdBy: frame.createdBy,
+        $kind: frame.kind,
+        $fontSize: frame.fontSize,
         $createdAt: frame.createdAt,
         $updatedAt: frame.updatedAt,
       });
@@ -364,7 +386,7 @@ export class Store {
     const rows = this.db
       .query(
         `SELECT f.id, f.name, f.width, f.height, f.x, f.y, f.version, f.repo, f.createdBy,
-                f.createdAt, f.updatedAt,
+                f.kind, f.fontSize, f.createdAt, f.updatedAt,
                 (SELECT COUNT(*) FROM comments c
                   WHERE c.frameId = f.id AND c.deletedAt IS NULL) AS commentCount,
                 -- Only thread roots count as open feedback, so this matches the number the

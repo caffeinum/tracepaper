@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import { Store } from "../src/store.ts";
 import { COMMENT_ID_RE, FRAME_ID_RE } from "../src/ids.ts";
 import type { Comment } from "../src/types.ts";
@@ -345,6 +346,79 @@ describe("persistence", () => {
     expect(second.getFrame(frame.id).name).toBe("Kept");
     expect(second.listComments({ frameId: frame.id })).toHaveLength(1);
     second.close();
+
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
+  });
+});
+
+describe("frame kinds", () => {
+  test("creates text and section frames; kind and fontSize persist and list back", () => {
+    const s = store();
+    const text = s.createFrame({
+      html: "",
+      name: "Auth flow",
+      kind: "text",
+      fontSize: 40,
+      width: 200,
+      height: 56,
+    });
+    expect(text.kind).toBe("text");
+    expect(text.fontSize).toBe(40);
+    expect(text.html).toBe("");
+
+    const section = s.createFrame({
+      html: "",
+      name: "Onboarding",
+      kind: "section",
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 800,
+    });
+    expect(section.kind).toBe("section");
+    expect(section.fontSize).toBeNull();
+
+    const html = s.createFrame({ html: "<p>hi</p>" });
+    expect(html.kind).toBe("html");
+    expect(html.fontSize).toBeNull();
+
+    const listed = s.listFrames();
+    expect(listed.map((f) => f.kind).sort()).toEqual(["html", "section", "text"]);
+    expect(listed.find((f) => f.id === text.id)?.fontSize).toBe(40);
+    expect(s.getFrame(section.id).name).toBe("Onboarding");
+  });
+
+  test("empty html is rejected for kind html but allowed for text/section", () => {
+    const s = store();
+    expect(() => s.createFrame({ html: "", kind: "html" })).toThrow(/must not be empty/);
+    expect(() => s.createFrame({ html: "", kind: "text", name: "T" })).not.toThrow();
+    expect(() => s.createFrame({ html: "", kind: "section", name: "S" })).not.toThrow();
+  });
+
+  test("an old db with no kind/fontSize columns backfills existing frames to 'html'", () => {
+    const path = `${import.meta.dir}/../.tmp-kind-test-${Date.now()}.db`;
+    // A pre-kind frames table: no kind, no fontSize columns.
+    const old = new Database(path, { create: true });
+    old.exec(
+      `CREATE TABLE frames (id TEXT PRIMARY KEY, name TEXT NOT NULL, html TEXT NOT NULL,
+        width REAL NOT NULL, height REAL NOT NULL, x REAL NOT NULL, y REAL NOT NULL,
+        version INTEGER NOT NULL, repo TEXT NOT NULL DEFAULT 'default', createdBy TEXT,
+        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    );
+    old
+      .query(
+        `INSERT INTO frames (id, name, html, width, height, x, y, version, createdAt, updatedAt)
+         VALUES ('frm_0000000000a1','Old','<p>old</p>',100,100,0,0,1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')`,
+      )
+      .run();
+    old.close();
+
+    const s = new Store(path);
+    const frame = s.getFrame("frm_0000000000a1");
+    expect(frame.kind).toBe("html");
+    expect(frame.fontSize).toBeNull();
+    expect(frame.html).toBe("<p>old</p>");
+    s.close();
 
     for (const suffix of ["", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
   });

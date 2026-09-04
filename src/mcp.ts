@@ -3,11 +3,15 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toFramePayload, type Bus } from "./events.ts";
 import type { Store } from "./store.ts";
 import {
+  AddSectionResultSchema,
+  AddTextResultSchema,
   GetCommentsResultSchema,
   ListCanvasesResultSchema,
   ListFramesResultSchema,
   PushHtmlResultSchema,
   GetFrameResultSchema,
+  addSectionShape,
+  addTextShape,
   deleteFrameShape,
   getCommentsShape,
   getFrameShape,
@@ -16,6 +20,8 @@ import {
   pushHtmlShape,
   replyToCommentShape,
   resolveCommentShape,
+  type AddSectionResult,
+  type AddTextResult,
   type Comment,
   type FrameSummary,
   type GetCommentsResult,
@@ -55,6 +61,10 @@ const PUSH_HTML_DESCRIPTION = [
   "for one-off frames. list_frames returns every frame's x, y, width and height, so read it first",
   "when you are placing something relative to existing work.",
   "",
+  "ORGANIZE: a wall of frames is hard to read. Lay related frames in a row/cluster, drop an add_text",
+  "heading just above each cluster, and optionally wrap a cluster in an add_section box so the human",
+  "can see the structure at a glance.",
+  "",
   "The loop: after pushing, tell the human to open the returned canvasUrl. They scroll the canvas,",
   "click anywhere on a frame to drop a pin, and type feedback there. Read that feedback back with",
   "get_comments — poll it with the cursor it returns. Answer with reply_to_comment, and close the",
@@ -64,6 +74,19 @@ const PUSH_HTML_DESCRIPTION = [
   "from git/TRACEPAPER_REPO — by default; pass repo to draw on another (list_canvases lists them).",
   "Auto-placement is per-canvas, so repos never collide. Updating an existing frameId keeps it on",
   "its current canvas.",
+].join("\n");
+
+const ADD_TEXT_DESCRIPTION = [
+  "Drop a title/label directly on the canvas (no box, no iframe) to organize clusters of frames —",
+  "e.g. a section heading above a row of related frames. The text is drawn in world px so it scales",
+  "with zoom like frame content. Auto-places if x/y are omitted; pass them to sit it just above the",
+  "cluster it titles.",
+].join("\n");
+
+const ADD_SECTION_DESCRIPTION = [
+  "Draw a named, outlined region behind a cluster of frames to group them visually. Grouping is by",
+  "position/containment, not ownership — the section does not move or own the frames inside it, it",
+  "just draws a labeled box behind them. Pass x/y/width/height to enclose the cluster.",
 ].join("\n");
 
 const GET_COMMENTS_DESCRIPTION = [
@@ -218,6 +241,86 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
             `Ask the human to open the canvas at ${result.canvasUrl} and leave comments on the frame.`,
             `Then poll get_comments (frameId: "${frame.id}") to read what they wrote.`,
             `Raw frame html: ${result.url}`,
+          ].join("\n"),
+          result,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "add_text",
+    {
+      title: "Add a text/title block",
+      description: ADD_TEXT_DESCRIPTION,
+      inputSchema: addTextShape,
+      outputSchema: AddTextResultSchema,
+    },
+    ({ text, x, y, size, repo }) => {
+      try {
+        const target = repo ?? defaultRepo;
+        const fontSize = size ?? 32;
+        // Rough bounds so auto-placement reserves a small slot, not a full frame's worth. The text
+        // itself sizes by fontSize; these are just for layout collision-avoidance.
+        const width = Math.max(40, Math.round(text.length * fontSize * 0.55));
+        const height = Math.round(fontSize * 1.4);
+        const frame = store.createFrame({
+          html: "",
+          name: text,
+          kind: "text",
+          fontSize,
+          width,
+          height,
+          x,
+          y,
+          repo: target,
+          createdBy: defaultRepo,
+        });
+        bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
+        const result: AddTextResult = { ...frame, canvasUrl: canvasUrl(frame.repo) };
+        return structuredResult(
+          [
+            `Added text "${frame.name}" (${frame.id}) at (${frame.x},${frame.y}) on canvas "${frame.repo}", ${fontSize}px.`,
+            `The human sees it live at ${result.canvasUrl}.`,
+          ].join("\n"),
+          result,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "add_section",
+    {
+      title: "Add a section region",
+      description: ADD_SECTION_DESCRIPTION,
+      inputSchema: addSectionShape,
+      outputSchema: AddSectionResultSchema,
+    },
+    ({ name, x, y, width, height, repo }) => {
+      try {
+        const target = repo ?? defaultRepo;
+        const frame = store.createFrame({
+          html: "",
+          name,
+          kind: "section",
+          width,
+          height,
+          x,
+          y,
+          repo: target,
+          createdBy: defaultRepo,
+        });
+        bus.emit({ type: "frame.created", frame: toFramePayload(frame) });
+        const result: AddSectionResult = { ...frame, canvasUrl: canvasUrl(frame.repo) };
+        return structuredResult(
+          [
+            `Added section "${frame.name}" (${frame.id}) at (${frame.x},${frame.y}), ${frame.width}x${frame.height} on canvas "${frame.repo}".`,
+            `It groups whatever frames sit inside it (visually, not by ownership). The human sees it at ${result.canvasUrl}.`,
           ].join("\n"),
           result,
         );

@@ -16,6 +16,17 @@ export const MAX_COMMENT_CHARS = 16_000;
 export const AuthorSchema = z.enum(["human", "agent"]);
 export type Author = z.infer<typeof AuthorSchema>;
 
+/**
+ * A frame is one of three kinds, discriminated by `kind`:
+ *  - "html"    — an iframe frame (the original): `html` is the document, `width`/`height` the box.
+ *  - "text"    — a title/label block: `name` is the text, `fontSize` its world-px size, `html` is "",
+ *                `width`/`height` are the text's rough bounds (used only for auto-placement).
+ *  - "section" — a named outlined region grouping a cluster: `name` is the label, `html` is "",
+ *                `width`/`height` the box. Grouping is by position, not ownership.
+ */
+export const FrameKindSchema = z.enum(["html", "text", "section"]);
+export type FrameKind = z.infer<typeof FrameKindSchema>;
+
 export const FrameSchema = z.object({
   id: z.string().regex(FRAME_ID_RE),
   name: z.string(),
@@ -29,6 +40,10 @@ export const FrameSchema = z.object({
   repo: z.string(),
   /** Who wrote the frame — the writing connection's own repo. Null on pre-repo frames. */
   createdBy: z.string().nullable(),
+  /** Discriminator: "html" (iframe), "text" (title block) or "section" (outlined region). */
+  kind: FrameKindSchema,
+  /** World-px font size; only meaningful for kind "text", null otherwise. */
+  fontSize: z.number().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -61,18 +76,29 @@ export const htmlField = z
   .min(1, "html must not be empty — push the document you want the human to look at")
   .max(MAX_HTML_BYTES, `html must be at most ${MAX_HTML_BYTES} bytes`);
 
-export const CreateFrameInputSchema = z.object({
-  html: htmlField,
-  name: z.string().min(1).optional(),
-  width: z.number().positive().default(DEFAULT_FRAME_WIDTH),
-  height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  /** Which repo / canvas the frame lands on. The MCP layer always resolves and passes this. */
-  repo: z.string().min(1).default("default"),
-  /** The writing connection's own repo, recorded even on a cross-repo write. */
-  createdBy: z.string().min(1).optional(),
-});
+export const CreateFrameInputSchema = z
+  .object({
+    // Empty for kind "text"/"section" (they carry no document); required non-empty for "html"
+    // via the refine below. push_html enforces non-empty separately through pushHtmlShape.
+    html: z.string().max(MAX_HTML_BYTES, `html must be at most ${MAX_HTML_BYTES} bytes`).default(""),
+    name: z.string().min(1).optional(),
+    width: z.number().positive().default(DEFAULT_FRAME_WIDTH),
+    height: z.number().positive().default(DEFAULT_FRAME_HEIGHT),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    /** Which repo / canvas the frame lands on. The MCP layer always resolves and passes this. */
+    repo: z.string().min(1).default("default"),
+    /** The writing connection's own repo, recorded even on a cross-repo write. */
+    createdBy: z.string().min(1).optional(),
+    /** The frame kind. Defaults to the original iframe frame. */
+    kind: FrameKindSchema.default("html"),
+    /** World-px font size for kind "text". */
+    fontSize: z.number().positive().optional(),
+  })
+  .refine((input) => input.kind !== "html" || input.html.length > 0, {
+    message: "html must not be empty — push the document you want the human to look at",
+    path: ["html"],
+  });
 export type CreateFrameInput = z.input<typeof CreateFrameInputSchema>;
 
 export const CreateCommentInputSchema = z.object({
@@ -116,6 +142,27 @@ export const pushHtmlShape = {
 };
 export const PushHtmlInputSchema = z.object(pushHtmlShape);
 export type PushHtmlInput = z.infer<typeof PushHtmlInputSchema>;
+
+export const addTextShape = {
+  text: z.string().min(1).describe("The heading/label text drawn straight on the canvas."),
+  x: z.number().optional().describe("Canvas position in world px. Omit to auto-place. Place it just above a cluster of frames to title them."),
+  y: z.number().optional().describe("Canvas position in world px. Omit to auto-place."),
+  size: z.number().positive().optional().describe("Font size in world px (default 32). It scales with zoom like the frames."),
+  repo: z.string().min(1).optional().describe("Which repo/canvas to draw on. Defaults to this connection's repo."),
+};
+export const AddTextInputSchema = z.object(addTextShape);
+export type AddTextInput = z.infer<typeof AddTextInputSchema>;
+
+export const addSectionShape = {
+  name: z.string().min(1).describe("The section label, shown at the region's top-left."),
+  x: z.number().describe("Top-left corner in world px."),
+  y: z.number().describe("Top-left corner in world px."),
+  width: z.number().positive().describe("Region width in world px — size it to enclose the cluster of frames."),
+  height: z.number().positive().describe("Region height in world px."),
+  repo: z.string().min(1).optional().describe("Which repo/canvas to draw on. Defaults to this connection's repo."),
+};
+export const AddSectionInputSchema = z.object(addSectionShape);
+export type AddSectionInput = z.infer<typeof AddSectionInputSchema>;
 
 export const getCommentsShape = {
   frameId: z.string().optional(),
@@ -174,6 +221,13 @@ export const PushHtmlResultSchema = z.object({
 });
 export type PushHtmlResult = z.infer<typeof PushHtmlResultSchema>;
 
+/** add_text / add_section both return the created frame plus the canvas URL to hand the human. */
+export const AddTextResultSchema = FrameSchema.extend({ canvasUrl: z.string() });
+export type AddTextResult = z.infer<typeof AddTextResultSchema>;
+
+export const AddSectionResultSchema = FrameSchema.extend({ canvasUrl: z.string() });
+export type AddSectionResult = z.infer<typeof AddSectionResultSchema>;
+
 export const GetFrameResultSchema = FrameSchema.extend({
   url: z.string(),
   canvasUrl: z.string(),
@@ -216,6 +270,9 @@ export type ListCanvasesResult = z.infer<typeof ListCanvasesResultSchema>;
  */
 export const CreateOrUpdateFrameBodySchema = PushHtmlInputSchema.extend({
   createdBy: z.string().min(1).optional(),
+  /** kind/fontSize let the HTTP layer create text/section frames too; defaults to the iframe frame. */
+  kind: FrameKindSchema.default("html"),
+  fontSize: z.number().positive().optional(),
 });
 export type CreateOrUpdateFrameBody = z.infer<typeof CreateOrUpdateFrameBodySchema>;
 
