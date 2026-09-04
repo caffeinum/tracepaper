@@ -32,7 +32,7 @@ import {
 } from "./types.ts";
 
 export const SERVER_NAME = "tracepaper";
-export const SERVER_VERSION = "0.7.2";
+export const SERVER_VERSION = "0.7.3";
 
 export type McpServerDeps = {
   store: Store;
@@ -191,6 +191,16 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
     `${baseUrl()}/?repo=${encodeURIComponent(repo)}`;
   const frameUrl = (frameId: string): string => `${baseUrl()}/f/${frameId}`;
 
+  /**
+   * A reminder appended to drawing/listing results: MCP is pull-only, so the agent never gets
+   * pushed a comment. Surfacing the open-thread count on the results it already reads turns the
+   * loop the other way — every time it draws or lists, it is nudged to go read the human's feedback.
+   */
+  const openCommentsNudge = (repo: string): string => {
+    const n = store.countOpenComments(repo);
+    return n === 0 ? "" : `\n\n⚠ ${n} open comment(s) from the human on "${repo}" — call get_comments to read and reply.`;
+  };
+
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
@@ -241,7 +251,7 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
             `Ask the human to open the canvas at ${result.canvasUrl} and leave comments on the frame.`,
             `Then poll get_comments (frameId: "${frame.id}") to read what they wrote.`,
             `Raw frame html: ${result.url}`,
-          ].join("\n"),
+          ].join("\n") + openCommentsNudge(frame.repo),
           result,
         );
       } catch (error) {
@@ -284,7 +294,7 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
           [
             `Added text "${frame.name}" (${frame.id}) at (${frame.x},${frame.y}) on canvas "${frame.repo}", ${fontSize}px.`,
             `The human sees it live at ${result.canvasUrl}.`,
-          ].join("\n"),
+          ].join("\n") + openCommentsNudge(frame.repo),
           result,
         );
       } catch (error) {
@@ -321,7 +331,7 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
           [
             `Added section "${frame.name}" (${frame.id}) at (${frame.x},${frame.y}), ${frame.width}x${frame.height} on canvas "${frame.repo}".`,
             `It groups whatever frames sit inside it (visually, not by ownership). The human sees it at ${result.canvasUrl}.`,
-          ].join("\n"),
+          ].join("\n") + openCommentsNudge(frame.repo),
           result,
         );
       } catch (error) {
@@ -407,7 +417,7 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
           result.frames.length === 0
             ? `No frames on ${scopeLabel}. Push a frame with push_html; the human watches it at ${result.canvasUrl}`
             : `${result.frames.length} frame(s) on ${scopeLabel} at ${result.canvasUrl}`;
-        return structuredResult([header, ...lines].join("\n"), result);
+        return structuredResult([header, ...lines].join("\n") + (all ? "" : openCommentsNudge(scope)), result);
       } catch (error) {
         return errorResult(error);
       }

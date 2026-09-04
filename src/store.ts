@@ -414,6 +414,20 @@ export class Store {
       .all() as { repo: string; frameCount: number; updatedAt: string | null }[];
   }
 
+  /** Open comment threads — unresolved, top-level, not deleted — i.e. human feedback not yet closed.
+   *  Scoped to a repo when given. Drives the "you have unread comments" nudge on tool results. */
+  countOpenComments(repo?: string): number {
+    const row = this.db
+      .query(
+        `SELECT COUNT(*) AS n FROM comments c
+           JOIN frames f ON f.id = c.frameId
+          WHERE c.resolved = 0 AND c.parentId IS NULL AND c.deletedAt IS NULL
+                ${repo === undefined ? "" : "AND f.repo = $repo"}`,
+      )
+      .get(repo === undefined ? {} : { $repo: repo }) as { n: number };
+    return row.n;
+  }
+
   deleteFrame(id: string): void {
     const changes = this.db.query("DELETE FROM frames WHERE id = ?").run(id).changes;
     if (changes === 0) throw new Error(`unknown frame: ${id} — call list_frames for the current frame ids, or omit frameId to create a new frame.`);
