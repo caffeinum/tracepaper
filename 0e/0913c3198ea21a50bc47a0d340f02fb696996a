@@ -1,0 +1,21 @@
+package.json
+  s_7adfa64874e58c::t_f612f7ac171c9e 3
+src/mcp.ts
+  s_7adfa64874e58c::t_86cf91a7478237 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0e0913c3198ea21a50bc47a0d340f02fb696996a",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
