@@ -1768,8 +1768,11 @@ function listenForFrameEscape(): void {
 
     // scroll: record the frame's content scroll and re-place just this frame's pins (and, if it
     // owns the open thread/composer, that panel too) so they track the content under it.
-    const x = num(data, "x", "scroll message");
-    const y = num(data, "y", "scroll message");
+    // Frame content is arbitrary HTML that can postMessage anything, so a malformed scroll report
+    // is ignored, not thrown on — only our own bridge sends well-formed ones.
+    const x = data["x"];
+    const y = data["y"];
+    if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) return;
     const previous = frameScrollOf(id);
     if (previous.x === x && previous.y === y) return;
     frameScroll.set(id, { x, y });
