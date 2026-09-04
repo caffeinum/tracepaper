@@ -1,0 +1,59 @@
+test/store.test.ts
+  s_7adfa64874e58c::t_023948de054d12 3
+  s_7adfa64874e58c::t_4172ebb7baf79a 354-426
+src/store.ts
+  s_7adfa64874e58c::t_aae331bcba3cdc 389
+  s_7adfa64874e58c::t_b83243114502dc 106-107
+  s_7adfa64874e58c::t_b5b399b8094462 224-230
+  s_7adfa64874e58c::t_6552cfe6c74a8c 275-276,280-282,295-296,298,313-314,321-322,335-336
+  s_7adfa64874e58c::t_d48f1e26149858 55-58
+src/types.ts
+  s_7adfa64874e58c::t_73b5653d65211c 224-230
+  s_7adfa64874e58c::t_c9dfca88236bbd 19-29,43-46
+  s_7adfa64874e58c::t_2e20eb6b5d976e 146-166
+  s_7adfa64874e58c::t_e98c12be2f0bee 79-101
+  s_7adfa64874e58c::t_255acb9064b8ed 273-275
+web/style.css
+  s_7adfa64874e58c::t_d4a39c4752188b 828-889
+  s_7adfa64874e58c::t_94d3e7782da075 622-628
+src/http.ts
+  s_7adfa64874e58c::t_14d3da855f79b5 288,291,299
+src/mcp.ts
+  s_7adfa64874e58c::t_1022d6ba37dea6 64-67
+  s_7adfa64874e58c::t_f506a97a8e7797 250-251,253-329
+  s_7adfa64874e58c::t_768e0175ec5380 79-91
+  s_7adfa64874e58c::t_ee9df3b395a0a5 6-7,13-14,23-24
+  s_eacdf770d99162::t_c609fbfe1ee8e3 252
+test/mcp-e2e.test.ts
+  s_7adfa64874e58c::t_0f04ac4a1a9bb1 32-33
+web/canvas.ts
+  s_7adfa64874e58c::t_f850df77699188 86-94,97-100,111-112
+  s_7adfa64874e58c::t_688a7f2cd061a9 897-898
+  s_7adfa64874e58c::t_6af185f898c6cb 30-33
+  s_7adfa64874e58c::t_7605616f50e369 1899
+  s_7adfa64874e58c::t_644d537f3f00d9 538-569,575,580-581,583-587,590-592,603-619,623-628,686,702,704-743,753-758,765-781,786-787
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "dc7e526f0e94d2a675d1dff5cc72f455b7080d06",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    },
+    "s_eacdf770d99162": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "37e46d39-19cd-49f9-831e-7abcb9428a8d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
