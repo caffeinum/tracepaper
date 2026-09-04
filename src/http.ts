@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
+import { findChrome, renderPng } from "./screenshot.ts";
 import type { Store } from "./store.ts";
 import type { Tunnel } from "./tunnel.ts";
 import {
@@ -65,12 +66,18 @@ export function startHttpServer(options: HttpServerOptions): HttpServer {
   assertCanvasBuilt(webDir);
   const closeStream = new Set<() => void>();
 
+  // The screenshot endpoint renders the frame doc through a loopback URL, so it needs the port the
+  // server actually bound. That is only known after listen() returns, so it rides in a mutable ref
+  // the handler reads on each request rather than being captured at closure-build time.
+  const portRef = { port };
+
   const handler = (request: Request): Response | Promise<Response> =>
-    route({ request, store, bus, webDir, closeStream, tunnel });
+    route({ request, store, bus, webDir, closeStream, tunnel, port: portRef.port });
 
   const server = listen(handler, port, host);
   const bound = server.port;
   if (bound === undefined) throw new Error(`Bun.serve bound no TCP port on ${host}`);
+  portRef.port = bound;
   const url = `http://${host}:${bound}`;
 
   return {
@@ -130,6 +137,8 @@ type Context = {
   webDir: string;
   closeStream: Set<() => void>;
   tunnel?: Tunnel | undefined;
+  /** The port the server actually bound, for the screenshot endpoint's loopback render URL. */
+  port: number;
 };
 
 const MUTATING = new Set(["POST", "PATCH", "DELETE"]);
@@ -205,6 +214,12 @@ async function route(ctx: Context): Promise<Response> {
 
     const rawFrameId = matchPrefix(path, "/f/");
     if (rawFrameId !== null) {
+      // Match the `.png` suffix before the html route so a screenshot request never falls through
+      // to serving the document. The id is the same, just with `.png` stripped.
+      if (rawFrameId.endsWith(".png")) {
+        if (method === "GET") return await handleFramePng(ctx, rawFrameId.slice(0, -".png".length), url);
+        return methodNotAllowed(method, path);
+      }
       if (method === "GET") return handleFrameHtml(ctx, rawFrameId);
       return methodNotAllowed(method, path);
     }
@@ -332,6 +347,55 @@ function handleFrameHtml(ctx: Context, id: string): Response {
       // sandbox with the response, so it holds however the document is loaded.
       "content-security-policy": "sandbox allow-scripts allow-forms allow-popups",
       "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+/** A filesystem-safe filename derived from the frame name, falling back to the id. */
+function safeFilename(name: string, id: string): string {
+  const cleaned = name
+    .normalize("NFKD")
+    .replace(/[^\w.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return cleaned.length > 0 ? cleaned : id;
+}
+
+async function handleFramePng(ctx: Context, id: string, url: URL): Promise<Response> {
+  // Throws "unknown frame …" for a bad id, which route's catch maps to the same 404 JSON as /f/:id.
+  const frame = ctx.store.getFrame(id);
+
+  const chrome = findChrome();
+  if (chrome === null) {
+    return json(
+      {
+        error:
+          "No Chrome/Chromium found for screenshots. Install Chrome or set TRACEPAPER_CHROME to its path.",
+      },
+      501,
+    );
+  }
+
+  // Render the frame's own static document over loopback. The tunnel host can't resolve inside a
+  // headless Chrome, so the render always goes through 127.0.0.1 on the port the server bound.
+  const target = `http://127.0.0.1:${ctx.port}/f/${id}`;
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await renderPng({ chrome, url: target, width: frame.width, height: frame.height });
+  } catch (error) {
+    return fail(500, error instanceof Error ? error.message : String(error));
+  }
+
+  const filename = safeFilename(frame.name, id);
+  const disposition = url.searchParams.has("download") ? "attachment" : "inline";
+  // Uint8Array is a valid BodyInit at runtime; TS's lib types only accept an ArrayBuffer-backed
+  // view, so hand it the underlying buffer directly.
+  return new Response(bytes.buffer as ArrayBuffer, {
+    headers: {
+      "content-type": "image/png",
+      "cache-control": "no-store",
+      "content-disposition": `${disposition}; filename="${filename}.png"`,
     },
   });
 }

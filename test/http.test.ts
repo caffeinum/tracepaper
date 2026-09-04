@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus, type BusEvent } from "../src/events.ts";
 import { startHttpServer, type HttpServer } from "../src/http.ts";
+import { findChrome, PNG_MAGIC } from "../src/screenshot.ts";
 import { Store } from "../src/store.ts";
 import type { Comment, Frame, FrameSummary } from "../src/types.ts";
 
@@ -280,6 +281,47 @@ describe("GET /f/:id", () => {
     expect(error).toContain("unknown frame: frm_000000000000");
     expect(error).toContain("list_frames");
   });
+});
+
+describe("GET /f/:id.png", () => {
+  test("unknown frame is 404 before any browser is consulted", async () => {
+    const res = await fetch(`${base}/f/frm_000000000000.png`);
+    expect(res.status).toBe(404);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain("unknown frame: frm_000000000000");
+  });
+
+  const chrome = findChrome();
+
+  // CI has no Chrome; guard the render so the suite never depends on a browser being installed.
+  if (chrome === null) {
+    test("without a Chrome install, the endpoint is a loud 501", async () => {
+      const frame = await createFrame("<h1>shot</h1>", "Shot Me");
+      const res = await fetch(`${base}/f/${frame.id}.png`);
+      expect(res.status).toBe(501);
+      const { error } = (await res.json()) as { error: string };
+      expect(error).toContain("TRACEPAPER_CHROME");
+    });
+  } else {
+    test(
+      "with a Chrome install, renders PNG bytes with the right headers",
+      async () => {
+        const frame = await createFrame("<h1 style='font:40px sans-serif'>shot</h1>", "Shot Me");
+        const res = await fetch(`${base}/f/${frame.id}.png`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("image/png");
+        expect(res.headers.get("cache-control")).toBe("no-store");
+        expect(res.headers.get("content-disposition")).toContain('inline; filename="Shot-Me.png"');
+
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        expect(bytes.slice(0, PNG_MAGIC.length)).toEqual(PNG_MAGIC);
+
+        const dl = await fetch(`${base}/f/${frame.id}.png?download`);
+        expect(dl.headers.get("content-disposition")).toContain("attachment");
+      },
+      30_000,
+    );
+  }
 });
 
 describe("comments", () => {

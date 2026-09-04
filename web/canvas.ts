@@ -595,6 +595,7 @@ type HtmlFrameNode = SketchParts & {
   name: HTMLSpanElement;
   dims: HTMLSpanElement;
   by: HTMLSpanElement;
+  save: HTMLAnchorElement;
   body: HTMLDivElement;
   iframe: HTMLIFrameElement;
   pins: HTMLDivElement;
@@ -647,13 +648,22 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   by.className = "frame-by";
   by.hidden = true;
   makeDraggable(name, frame.id);
+  // "Save as PNG" — a same-origin download link (works over the tunnel too). Its href/download are
+  // wired here and refreshed on rename in renderFrames. It is a plain link, so it never interferes
+  // with the title drag or selection.
+  const save = document.createElement("a");
+  save.className = "frame-save";
+  save.title = "Save as PNG";
+  save.setAttribute("aria-label", "Save as PNG");
+  save.innerHTML =
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v8m0 0L6.5 7.5M10 11l3.5-3.5M4 13v2a2 2 0 002 2h8a2 2 0 002-2v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const kill = document.createElement("button");
   kill.className = "frame-kill";
   kill.type = "button";
   kill.title = "Delete frame";
   kill.textContent = "✕";
   kill.addEventListener("click", () => requestDeleteFrame(frame.id));
-  label.append(name, dims, by, kill);
+  label.append(name, dims, by, save, kill);
 
   const body = document.createElement("div");
   body.className = "frame-body";
@@ -707,7 +717,7 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   // above so clicks and pins stay on top. The sketch SVGs are pointer-events:none via CSS.
   body.append(parts.sketchFill, iframe, parts.sketch, catcher, pins);
   root.append(label, body, hint);
-  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, body, iframe, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
+  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, save, body, iframe, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
   // Clip the iframe to the wobbly outline so its straight edges never poke past the drawn line.
   const p1 = paintSketch(node, frame.width, frame.height);
   node.iframe.style.clipPath = `path('${p1}')`;
@@ -797,6 +807,10 @@ function renderFrames(): void {
     }
     node.name.textContent = frame.name;
     node.dims.textContent = `${Math.round(frame.width)} × ${Math.round(frame.height)}`;
+    // Keep the PNG download link's href and suggested filename in step with the frame's name.
+    const safeName = frame.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || frame.id;
+    node.save.href = `/f/${frame.id}.png?download`;
+    node.save.setAttribute("download", `${safeName}.png`);
     // Attribution is redundant once you have filtered to one canvas, so it only shows in All view.
     const showBy = currentRepo === null && frame.createdBy !== null;
     node.by.textContent = showBy ? (frame.createdBy ?? "") : "";
