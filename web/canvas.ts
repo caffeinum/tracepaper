@@ -878,14 +878,14 @@ function updateFrameDetail(): void {
     const coverage = (ix * iy) / stageArea;
     const dominant = coverage > DOMINANT_COVERAGE;
     if (dominant && !node.loaded) {
-      // Go live. Keep the thumb visible until the iframe has actually painted, so stepping in never
-      // flashes a blank paper card.
-      node.iframe.hidden = false;
+      // Go live. Keep the thumb painted and the iframe hidden until the iframe has actually loaded;
+      // only then reveal the iframe and drop the thumb, so the swap never shows a blank paper card.
+      node.loaded = true;
       node.iframe.onload = () => {
+        node.iframe.hidden = false;
         node.thumb.hidden = true;
       };
       node.iframe.src = node.desiredSrc;
-      node.loaded = true;
     } else if (!dominant && node.loaded) {
       // Revert to the thumbnail and free the live document's memory.
       node.thumb.hidden = false;
