@@ -1899,12 +1899,19 @@ async function loadAll(): Promise<void> {
   // Scope both frames and comments to the selected canvas so pins match the visible frames; null
   // fetches everything unfiltered. The repo list is always fetched whole — the switcher offers
   // every canvas regardless of which one is in view.
-  const scope = currentRepo === null ? "" : `&repo=${encodeURIComponent(currentRepo)}`;
+  // Capture the scope this fetch was issued under. loadAll runs concurrently (a switch fires one
+  // while the 5s reconcile or the initial load has another in flight), and responses can land out of
+  // order — so a slow *unscoped* fetch must not clobber a freshly switched-to canvas with all frames.
+  const scopeAtStart = currentRepo;
+  const scope = scopeAtStart === null ? "" : `&repo=${encodeURIComponent(scopeAtStart)}`;
   const [framePayload, commentPayload, repoPayload] = await Promise.all([
-    api(currentRepo === null ? "/api/frames" : `/api/frames?repo=${encodeURIComponent(currentRepo)}`),
+    api(scopeAtStart === null ? "/api/frames" : `/api/frames?repo=${encodeURIComponent(scopeAtStart)}`),
     api(`/api/comments?includeResolved=true${scope}`),
     api("/api/repos"),
   ]);
+  // The canvas was switched while this fetch was in flight; its data is for the old scope. Drop it —
+  // the switch issued its own loadAll for the new scope.
+  if (currentRepo !== scopeAtStart) return;
   frames.clear();
   frameOrder.length = 0;
   comments.clear();
