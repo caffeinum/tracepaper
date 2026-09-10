@@ -11,6 +11,9 @@
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 4;
 const GRID = 24;
+// Arrow-key panning: a nudge, and a full-page jump with Shift. Screen px, so speed is zoom-independent.
+const PAN_STEP = 80;
+const PAN_PAGE_STEP = 400;
 
 // ---------------------------------------------------------------- boundary
 
@@ -1782,6 +1785,23 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "t" || event.key === "T") {
     event.preventDefault();
     toggleCommentList();
+    return;
+  }
+  // Arrow keys pan the canvas for people without a trackpad/mouse. Shift pans a full "page" step.
+  // Direction matches scrolling: ArrowDown reveals what's below, so the world slides up.
+  if (
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight"
+  ) {
+    event.preventDefault();
+    const step = event.shiftKey ? PAN_PAGE_STEP : PAN_STEP;
+    if (event.key === "ArrowUp") view.y += step;
+    else if (event.key === "ArrowDown") view.y -= step;
+    else if (event.key === "ArrowLeft") view.x += step;
+    else view.x -= step;
+    applyView();
     return;
   }
   if (event.key === " ") {
