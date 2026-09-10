@@ -319,7 +319,9 @@ describe("GET /f/:id.png", () => {
         const dl = await fetch(`${base}/f/${frame.id}.png?download`);
         expect(dl.headers.get("content-disposition")).toContain("attachment");
       },
-      30_000,
+      // Above the render cap (RENDER_TIMEOUT_MS) so a slow cold render returns its own verdict
+      // rather than the test harness killing it first. Two renders (inline + ?download) can run.
+      70_000,
     );
   }
 });

@@ -10,8 +10,13 @@ import { join } from "node:path";
 
 const CLAMP_MIN = 1;
 const CLAMP_MAX = 4000;
-/** A frame document at /f/:id is static (no SSE), so `--screenshot` terminates; this only guards a hang. */
-const RENDER_TIMEOUT_MS = 15_000;
+/**
+ * A frame document at /f/:id is static (no SSE), so `--screenshot` terminates; this only guards a
+ * hang. Generous because a *cold* first Chrome launch (fresh profile, loaded/CI machine) can take
+ * ~15-20s just to write the first shot — the warm path still returns the moment the file is stable
+ * (~3s), so raising the cap only rescues the slow case instead of failing it.
+ */
+const RENDER_TIMEOUT_MS = 30_000;
 
 /** macOS app-bundle binaries, checked with existsSync. */
 const MAC_BUNDLES = [
