@@ -94,10 +94,9 @@ async function main(): Promise<void> {
   const bus = new Bus();
 
   const live = mode === "stdio" ? await findLiveServer(config) : null;
-  const localUrl = live ?? `http://${config.host}:${config.port}`;
   // Only the process that owns the http server owns a tunnel; a joined stdio process watches
   // the owner's instead, so a Share click in the browser reaches the agent's canvasUrl too.
-  const tunnel = live === null ? new Tunnel(localUrl) : null;
+  const tunnel = live === null ? new Tunnel() : null;
   const remoteShare = live === null ? null : new RemoteTunnelView(live);
   remoteShare?.start();
   const http =
@@ -105,6 +104,9 @@ async function main(): Promise<void> {
       ? null
       : startHttpServer({ store, bus, port: config.port, host: config.host, tunnel });
 
+  // Point the tunnel at the port the server ACTUALLY bound (listen() may fall back off a conflict),
+  // not the requested one — otherwise Share forwards to a dead socket and every visitor gets a 502.
+  if (http !== null) tunnel?.setTarget(http.url);
   if (http !== null) writeServerJson(config, http, mode);
   const localCanvasUrl = live ?? http?.url;
   if (localCanvasUrl === undefined) {

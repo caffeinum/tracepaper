@@ -67,8 +67,19 @@ export class Tunnel {
   private child: ChildProcess | null = null;
   private state: TunnelState = { status: "off" };
   private starting: Promise<TunnelState> | null = null;
+  private localUrl: string | null;
 
-  constructor(private readonly localUrl: string) {}
+  // The target may be unknown at construction: the http server can bind a *different* port than
+  // requested (listen() falls back on a conflict), and a tunnel pointed at the requested port would
+  // forward to a dead socket. So the owner calls setTarget() with the actually-bound url after
+  // listen() returns, before any Share can start the tunnel.
+  constructor(localUrl: string | null = null) {
+    this.localUrl = localUrl;
+  }
+
+  setTarget(localUrl: string): void {
+    this.localUrl = localUrl;
+  }
 
   current(): TunnelState {
     return this.state;
@@ -88,9 +99,14 @@ export class Tunnel {
 
   private spawnTunnel(): Promise<TunnelState> {
     return new Promise<TunnelState>((resolve) => {
+      const target = this.localUrl;
+      if (target === null) {
+        resolve(this.fail("tunnel target is not set — the http server has not bound a port yet"));
+        return;
+      }
       let child: ChildProcess;
       try {
-        child = spawn(BINARY, ["tunnel", "--url", this.localUrl], {
+        child = spawn(BINARY, ["tunnel", "--url", target], {
           stdio: ["ignore", "pipe", "pipe"],
         });
       } catch (error) {
