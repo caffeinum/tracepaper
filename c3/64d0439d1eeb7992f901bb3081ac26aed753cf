@@ -1,0 +1,22 @@
+src/tunnel.ts
+  s_7adfa64874e58c::t_70898a0e31177e 70,72-82
+  s_7adfa64874e58c::t_5e6a2c9113a535 102-106,109
+src/index.ts
+  s_7adfa64874e58c::t_6d911b66f8d8b4 99,107-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c364d0439d1eeb7992f901bb3081ac26aed753cf",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
