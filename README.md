@@ -98,6 +98,55 @@ port, so agent pushes land in the tab you already have open.
 
 stdout belongs to the MCP stdio transport; every log line goes to stderr.
 
+## Shared server (one process for many agents)
+
+Each agent running its own stdio server loads its own copy of the MCP SDK — about **56 MB of
+resident memory per agent**, before any wrappers. With a dozen agents that is gigabytes of
+duplicate runtime. Instead, run **one** server and let every agent share it:
+
+```sh
+bunx github:caffeinum/tracepaper up        # start the shared server in the background (idempotent)
+bunx github:caffeinum/tracepaper status    # is it up? print the canvas + mcp URLs
+bunx github:caffeinum/tracepaper down       # stop it
+```
+
+`up` daemonises `serve` (pid + log under `~/.tracepaper/`, survives the terminal) and is
+idempotent — run it from every agent's startup if you like; a second call just prints the URLs
+and exits `0`. It mounts the MCP protocol at **`/mcp`** alongside the canvas.
+
+Agents then connect **without each loading the SDK**, two ways:
+
+**1. Nothing to change (recommended).** The normal launch command auto-detects the shared server
+and becomes a tiny stdio→HTTP *bridge* (~15 MB, no SDK) instead of a full server. One identical
+command for every agent; each agent's canvas is still auto-scoped from its own working directory,
+exactly as before — the bridge sends it as a header, so there is no per-agent URL to edit.
+
+```jsonc
+// identical for every agent — scoping comes from each agent's own cwd/env, not the config
+{ "mcpServers": { "tracepaper": { "command": "bunx", "args": ["github:caffeinum/tracepaper"] } } }
+```
+
+**2. Direct HTTP (leanest).** If your client speaks MCP over HTTP, skip the per-agent process
+entirely and point it at `/mcp`. Scope the canvas with an `x-tracepaper-repo` header or a `?repo=`
+query (a client that can template its own agent id into either gets per-agent canvases from one
+identical config line):
+
+```jsonc
+{ "mcpServers": { "tracepaper": { "type": "http", "url": "http://127.0.0.1:4321/mcp" } } }
+```
+
+Rough memory for ~24 agents on one machine (measured, macOS `phys_footprint`):
+
+| model | per agent | ~24 agents |
+| --- | --- | --- |
+| `npx` stdio server (SDK + npm + node wrappers) | ~154 MB | ~3.7 GB |
+| `bun` stdio server (no wrappers) | ~61 MB | ~1.5 GB |
+| **shared + bridge** (mode 1) | ~15 MB + shared 58 MB | **~0.5 GB** |
+| **shared + direct HTTP** (mode 2) | ~1.5 MB in the shared server | **~0.1 GB** |
+
+If no shared server is running, the normal command falls back to a self-contained stdio server —
+so a first-time `bunx github:caffeinum/tracepaper` with nothing set up still just works.
+
 ## CLI (no MCP)
 
 If your agent's client can't run MCP, the same eight tools are on the command line. Every verb

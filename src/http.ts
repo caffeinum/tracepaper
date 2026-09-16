@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
+import { createMcpHttpHandler, type McpHttpHandler } from "./mcp-http.ts";
 import { findChrome, renderCached, renderPng } from "./screenshot.ts";
 import type { Store } from "./store.ts";
 import type { Tunnel } from "./tunnel.ts";
@@ -52,6 +53,12 @@ export type HttpServerOptions = {
   tunnel?: Tunnel;
   /** Canvas app root. Defaults to the repo's `web/` directory, resolved from this module. */
   webDir?: string;
+  /**
+   * When set, mount the MCP protocol at `/mcp` so agents share this one server instead of each
+   * spawning its own stdio MCP server. The value is the canvas a connection that names none lands
+   * on; agents pick their own via the `x-tracepaper-repo` header (the bridge) or a `?repo=` query.
+   */
+  mcpDefaultRepo?: string;
 };
 
 export type HttpServer = {
@@ -71,8 +78,23 @@ export function startHttpServer(options: HttpServerOptions): HttpServer {
   // the handler reads on each request rather than being captured at closure-build time.
   const portRef = { port };
 
+  // Mount MCP-over-HTTP when asked. baseUrl is read per request (lazy) so it reflects the tunnel
+  // hostname once Share is on and the bound port once listen() returns.
+  const mcp =
+    options.mcpDefaultRepo === undefined
+      ? undefined
+      : createMcpHttpHandler({
+          store,
+          bus,
+          defaultRepo: options.mcpDefaultRepo,
+          baseUrl: () => {
+            const state = tunnel?.current();
+            return state?.status === "on" ? state.url : `http://${host}:${portRef.port}`;
+          },
+        });
+
   const handler = (request: Request): Response | Promise<Response> =>
-    route({ request, store, bus, webDir, closeStream, tunnel, port: portRef.port });
+    route({ request, store, bus, webDir, closeStream, tunnel, mcp, port: portRef.port });
 
   const server = listen(handler, port, host);
   const bound = server.port;
@@ -137,6 +159,8 @@ type Context = {
   webDir: string;
   closeStream: Set<() => void>;
   tunnel?: Tunnel | undefined;
+  /** The MCP-over-HTTP handler, mounted at /mcp when the server was started with mcpDefaultRepo. */
+  mcp?: McpHttpHandler | undefined;
   /** The port the server actually bound, for the screenshot endpoint's loopback render URL. */
   port: number;
 };
@@ -169,6 +193,13 @@ async function route(ctx: Context): Promise<Response> {
   const { request } = ctx;
   const url = new URL(request.url);
   const method = request.method;
+
+  // MCP over HTTP owns /mcp and speaks its own protocol (its own session + content-type rules), so
+  // it runs before the browser-write CSRF guard and the canvas routing below.
+  if (url.pathname === "/mcp") {
+    if (ctx.mcp === undefined) return json({ error: "MCP over HTTP is not enabled on this server" }, 501);
+    return ctx.mcp(request, url);
+  }
 
   const refused = guardMutation(request, method);
   if (refused !== null) return refused;
@@ -276,7 +307,7 @@ function handleShareStop(ctx: Context): Response {
 
 function handleHealth(ctx: Context): Response {
   const { frames, comments } = ctx.store.counts();
-  return json(HealthSchema.parse({ ok: true, frames, comments }));
+  return json(HealthSchema.parse({ ok: true, frames, comments, mcp: ctx.mcp !== undefined }));
 }
 
 function handleListRepos(ctx: Context): Response {

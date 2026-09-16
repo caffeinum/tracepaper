@@ -16,6 +16,9 @@ import { loadConfig, type Config } from "./config.ts";
 import { resolveRepo } from "./repo.ts";
 import { Store } from "./store.ts";
 import type { Comment } from "./types.ts";
+import { CLI_VERBS } from "./verbs.ts";
+
+export { CLI_VERBS };
 
 /** The connection's own repo, resolved from cwd/env — the writer identity, like an stdio agent. */
 function ownRepo(): string {
@@ -26,19 +29,6 @@ function ownRepo(): string {
 function repoFlag(flags: Flags): string {
   return typeof flags["repo"] === "string" ? flags["repo"] : ownRepo();
 }
-
-/** The verbs the CLI owns. Anything not here falls through to stdio / serve in index.ts. */
-export const CLI_VERBS = new Set([
-  "push",
-  "comments",
-  "reply",
-  "resolve",
-  "list",
-  "get",
-  "tidy",
-  "delete",
-  "help",
-]);
 
 type Flags = { _: string[]; [key: string]: string | boolean | string[] };
 
