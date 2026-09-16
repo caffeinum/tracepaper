@@ -341,5 +341,8 @@ export const HealthSchema = z.object({
   ok: z.literal(true),
   frames: z.number().int(),
   comments: z.number().int(),
+  // True when this server also speaks MCP over HTTP at /mcp, so a joining agent bridges to it
+  // instead of running its own stdio MCP server. Optional so older servers still validate.
+  mcp: z.boolean().optional(),
 });
 export type Health = z.infer<typeof HealthSchema>;
