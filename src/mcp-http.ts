@@ -14,6 +14,7 @@
  */
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { tolerateAbsentToolArguments } from "./compat.ts";
 import type { Bus } from "./events.ts";
 import { createMcpServer } from "./mcp.ts";
 import type { Store } from "./store.ts";
@@ -84,7 +85,9 @@ export function createMcpHttpHandler(deps: McpHttpDeps): McpHttpHandler {
       baseUrl: deps.baseUrl,
       defaultRepo: repo,
     });
-    await server.connect(transport);
+    // Same tolerance as the stdio path: a client may omit `arguments` on a no-arg tools/call
+    // (mcpt does), which the tool's zod object would otherwise reject.
+    await server.connect(tolerateAbsentToolArguments(transport));
     return transport.handleRequest(request);
   };
 }

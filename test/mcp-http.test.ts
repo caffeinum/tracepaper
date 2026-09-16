@@ -99,6 +99,31 @@ describe("MCP over HTTP", () => {
     expect(body.result.content[0].text).toContain('wire-canvas');
   });
 
+  // Clients like mcpt omit `arguments` entirely on a no-arg call; the endpoint must tolerate it
+  // (same as the stdio path) or list_frames is unreachable over HTTP / the bridge.
+  test("bridge wire: tools/call with no arguments field is tolerated", async () => {
+    const init = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+      }),
+    });
+    const sid = init.headers.get("mcp-session-id")!;
+    const call = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sid },
+      // NB: no `arguments` key at all
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_frames" } }),
+    });
+    const body = await call.json();
+    expect(body.error).toBeUndefined();
+    expect(body.result.isError).toBeFalsy();
+  });
+
   test("a full MCP HTTP client shares the server; two clients get independent canvases", async () => {
     const connect = async (repo: string): Promise<Client> => {
       const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp?repo=${repo}`));
