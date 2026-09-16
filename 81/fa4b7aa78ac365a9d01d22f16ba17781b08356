@@ -1,0 +1,51 @@
+src/verbs.ts
+  s_7adfa64874e58c::t_a789829ad58039 1-16
+test/mcp-http.test.ts
+  s_7adfa64874e58c::t_c82ef7c6714add 117-118
+  s_7adfa64874e58c::t_3f2dd1c3ffc174 1-116,119-123
+src/cli.ts
+  s_7adfa64874e58c::t_c08f852a40cec1 19-21
+src/daemon.ts
+  s_7adfa64874e58c::t_c4fedf76a780ba 1-150
+src/bridge.ts
+  s_7adfa64874e58c::t_a67c5b4114de41 1-84
+src/index.ts
+  s_7adfa64874e58c::t_cf4faa6e71202a 5-10,36-37,40-41,53,64-66,80-88,93-104,107-109,111-112,114,121-122,128-129,131-138,150-190
+  s_7adfa64874e58c::t_8faba7b55b6458 43,54-57
+  s_7adfa64874e58c::t_784d111ef958ed 191-192
+src/http.ts
+  s_7adfa64874e58c::t_3c8ab78856438b 197-203
+  s_7adfa64874e58c::t_68e8b751192f4d 310
+  s_7adfa64874e58c::t_b1a051e3454e13 56-61
+  s_7adfa64874e58c::t_5daa758d0b8638 6
+  s_7adfa64874e58c::t_ad66ebf6757191 81-95,97
+  s_7adfa64874e58c::t_01b752161fcc64 162-163
+src/legacy-join.ts
+  s_7adfa64874e58c::t_5cb1d79325610f 1-44
+test/daemon.test.ts
+  s_7adfa64874e58c::t_08a06fbcf5975d 1-47
+README.md
+  s_7adfa64874e58c::t_67280c6587df6d 101-149
+src/mcp-http.ts
+  s_7adfa64874e58c::t_b6338cedd38609 2-4,6-8,11-13,31-33,35-38,50-52,54,62,73
+  s_7adfa64874e58c::t_ef7b422c5c5486 74-76
+  s_7adfa64874e58c::t_c3ac669d943d37 1,5,9-10,14-30,34,39-49,53,55-61,63-72,77-90
+src/types.ts
+  s_7adfa64874e58c::t_ec968da5a67e6b 344-346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81fa4b7aa78ac365a9d01d22f16ba17781b08356",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
