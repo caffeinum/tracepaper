@@ -28,7 +28,7 @@ type CanvasFrame = {
   version: number;
   /** The canvas/scope this frame belongs to; used by the repo switcher and SSE filtering. */
   repo: string;
-  /** Who pushed the frame, shown as attribution in the "All canvases" view. Null when unknown. */
+  /** Who pushed the frame; shown as attribution when a different agent drew into this canvas. Null when unknown. */
   createdBy: string | null;
   /** "html" (iframe), "text" (title block) or "section" (outlined region). */
   kind: "html" | "text" | "section";
@@ -265,9 +265,10 @@ let selectedFrameId: string | null = null;
 let spaceHeld = false;
 let hasFitted = false;
 /**
- * The canvas currently in view. null means "All canvases" — every repo's frames unfiltered.
- * It rides in the URL query (?repo=…) so a canvas is linkable, and every data fetch and SSE
- * update is scoped through it so a filtered view stays filtered.
+ * The canvas currently in view. The view is always exactly one canvas — there is no "all canvases"
+ * view. null means "not resolved yet": on load with no ?repo= loadAll picks the latest-written
+ * canvas, and on an empty db the first frame an agent draws is adopted. It rides in the URL query
+ * (?repo=…) so a canvas is linkable, and every data fetch and SSE update is scoped through it.
  */
 let currentRepo: string | null = null;
 // ⌘0 alternates between framing the selection and the whole canvas; this holds which comes next.
@@ -649,7 +650,7 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   name.className = "frame-name";
   const dims = document.createElement("span");
   dims.className = "frame-dims";
-  // Attribution — who pushed the frame. Only shown in the "All canvases" view; see renderFrames.
+  // Attribution — who pushed the frame. Shown only when a different agent drew into this canvas; see renderFrames.
   const by = document.createElement("span");
   by.className = "frame-by";
   by.hidden = true;
@@ -832,8 +833,9 @@ function renderFrames(): void {
     const safeName = frame.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || frame.id;
     node.save.href = `/f/${frame.id}.png?download`;
     node.save.setAttribute("download", `${safeName}.png`);
-    // Attribution is redundant once you have filtered to one canvas, so it only shows in All view.
-    const showBy = currentRepo === null && frame.createdBy !== null;
+    // Attribution shows only when a DIFFERENT agent drew into this canvas — i.e. the writer's repo
+    // differs from the canvas in view. A frame drawn by this canvas's own agent needs no label.
+    const showBy = frame.createdBy !== null && frame.createdBy !== currentRepo;
     node.by.textContent = showBy ? (frame.createdBy ?? "") : "";
     node.by.hidden = !showBy;
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
@@ -1484,15 +1486,11 @@ function writeRepoQuery(repo: string | null): void {
   history.replaceState(null, "", `${window.location.pathname}${search}${window.location.hash}`);
 }
 
-/** Rebuilds the switcher's options, preserving the current selection even if its repo is now empty. */
+/** Rebuilds the switcher's options. There is no "all canvases" entry — the view is always one
+ * canvas. The current selection stays selectable even if its canvas has just gone empty. */
 function renderRepoSwitcher(repos: RepoInfo[]): void {
   const selected = currentRepo;
   repoSwitcher.replaceChildren();
-
-  const all = document.createElement("option");
-  all.value = "";
-  all.textContent = "All canvases";
-  repoSwitcher.appendChild(all);
 
   for (const info of repos) {
     const option = document.createElement("option");
@@ -1501,21 +1499,21 @@ function renderRepoSwitcher(repos: RepoInfo[]): void {
     repoSwitcher.appendChild(option);
   }
   // Keep the current selection selectable even when its canvas has just gone empty (0 frames drop
-  // it from listRepos), so the view does not silently snap back to "All".
+  // it from listRepos), so the view does not silently jump to another canvas.
   if (selected !== null && !repos.some((info) => info.repo === selected)) {
     const option = document.createElement("option");
     option.value = selected;
     option.textContent = `${selected} · 0`;
     repoSwitcher.appendChild(option);
   }
-  repoSwitcher.value = selected ?? "";
+  if (selected !== null) repoSwitcher.value = selected;
 }
 
 /**
  * Switch canvases: reset the selection/interaction that belonged to the old canvas, point the URL
  * at the new one, then refetch + re-render + re-fit so the view lands on the newly chosen canvas.
  */
-async function setRepo(next: string | null): Promise<void> {
+async function setRepo(next: string): Promise<void> {
   if (next === currentRepo) return;
   currentRepo = next;
   setSelected(null);
@@ -1527,8 +1525,7 @@ async function setRepo(next: string | null): Promise<void> {
 }
 
 repoSwitcher.addEventListener("change", () => {
-  const value = repoSwitcher.value;
-  void setRepo(value === "" ? null : value).catch(fail);
+  if (repoSwitcher.value !== "") void setRepo(repoSwitcher.value).catch(fail);
 });
 
 function updateCursor(): void {
@@ -1916,16 +1913,34 @@ el<HTMLButtonElement>("copy-config").addEventListener("click", (event) => {
 // ---------------------------------------------------------------- data + sse
 
 async function loadAll(): Promise<void> {
-  // Scope both frames and comments to the selected canvas so pins match the visible frames; null
-  // fetches everything unfiltered. The repo list is always fetched whole — the switcher offers
-  // every canvas regardless of which one is in view.
-  // Capture the scope this fetch was issued under. loadAll runs concurrently (a switch fires one
-  // while the 5s reconcile or the initial load has another in flight), and responses can land out of
-  // order — so a slow *unscoped* fetch must not clobber a freshly switched-to canvas with all frames.
+  // The view is always exactly one canvas — never "all canvases" (that fetched every repo's frames
+  // and was slow). With no canvas selected yet (fresh load, no ?repo=, or an empty db), resolve the
+  // latest-written one from the repo list first, then fall through to its scoped fetch.
+  if (currentRepo === null) {
+    const repos = toList(await api("/api/repos"), "repos").map(toRepo);
+    renderRepoSwitcher(repos);
+    const latest = repos[0]; // /api/repos is ordered by updatedAt DESC
+    if (latest === undefined) {
+      // No canvases exist yet. Show nothing until an agent draws the first frame (adopted via SSE).
+      frames.clear();
+      frameOrder.length = 0;
+      comments.clear();
+      renderAll();
+      return;
+    }
+    currentRepo = latest.repo;
+    writeRepoQuery(currentRepo);
+    repoSwitcher.value = currentRepo;
+  }
+
+  // Scope both frames and comments to the selected canvas so pins match the visible frames. Capture
+  // the scope this fetch was issued under: loadAll runs concurrently (a switch fires one while the 5s
+  // reconcile has another in flight), and responses can land out of order — a stale response for a
+  // now-abandoned canvas must not clobber the current one.
   const scopeAtStart = currentRepo;
-  const scope = scopeAtStart === null ? "" : `&repo=${encodeURIComponent(scopeAtStart)}`;
+  const scope = `&repo=${encodeURIComponent(scopeAtStart)}`;
   const [framePayload, commentPayload, repoPayload] = await Promise.all([
-    api(scopeAtStart === null ? "/api/frames" : `/api/frames?repo=${encodeURIComponent(scopeAtStart)}`),
+    api(`/api/frames?repo=${encodeURIComponent(scopeAtStart)}`),
     api(`/api/comments?includeResolved=true${scope}`),
     api("/api/repos"),
   ]);
@@ -2148,11 +2163,16 @@ function subscribe(): void {
     });
   };
 
-  // A filtered view stays filtered: frames on another canvas are dropped rather than rendered.
-  // (The 5s reconcile refetches with the same scope, so nothing leaks in through that path either.)
+  // The view is one canvas: frames on another canvas are dropped rather than rendered. (The 5s
+  // reconcile refetches with the same scope, so nothing leaks in through that path either.)
   handle("frame.created", (payload) => {
     const frame = toFrame(unwrap(payload, "frame"));
-    if (currentRepo !== null && frame.repo !== currentRepo) return;
+    // Empty db with no canvas chosen yet: adopt the first canvas an agent draws into.
+    if (currentRepo === null) {
+      void setRepo(frame.repo).catch(fail);
+      return;
+    }
+    if (frame.repo !== currentRepo) return;
     putFrame(frame);
     renderAll();
     if (!hasFitted) {
@@ -2163,7 +2183,7 @@ function subscribe(): void {
 
   handle("frame.updated", (payload) => {
     const frame = toFrame(unwrap(payload, "frame"));
-    if (currentRepo !== null && frame.repo !== currentRepo) return;
+    if (frame.repo !== currentRepo) return;
     putFrame(frame);
     renderAll();
   });
@@ -2178,14 +2198,14 @@ function subscribe(): void {
   // not in view belongs to another canvas and is ignored.
   handle("comment.created", (payload) => {
     const comment = toComment(unwrap(payload, "comment"));
-    if (currentRepo !== null && !frames.has(comment.frameId)) return;
+    if (!frames.has(comment.frameId)) return;
     comments.set(comment.id, comment);
     renderAll();
   });
 
   handle("comment.updated", (payload) => {
     const comment = toComment(unwrap(payload, "comment"));
-    if (currentRepo !== null && !frames.has(comment.frameId)) return;
+    if (!frames.has(comment.frameId)) return;
     comments.set(comment.id, comment);
     renderAll();
   });
@@ -2206,8 +2226,9 @@ setTool("select");
 applyView();
 renderSidebar();
 // Reflect the canvas named in the URL before the first fetch, so a shared ?repo= link loads scoped.
+// With no ?repo=, loadAll picks the latest-written canvas — there is no "all canvases" view.
 currentRepo = repoFromQuery();
-repoSwitcher.value = currentRepo ?? "";
+if (currentRepo !== null) repoSwitcher.value = currentRepo;
 zoomToFit();
 loadAll().catch(fail);
 window.addEventListener("hashchange", () => {
