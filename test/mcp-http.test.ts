@@ -124,6 +124,47 @@ describe("MCP over HTTP", () => {
     expect(body.result.isError).toBeFalsy();
   });
 
+  // A restart loses the in-memory session map. A live bridge's next call carries a session id the
+  // new process never issued; it must be resurrected (scoped by the header), not answered with 400.
+  test("a stale session id after a server restart is resurrected, not rejected", async () => {
+    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    const init = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { ...headers, "x-tracepaper-repo": "survivor" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+      }),
+    });
+    const sid = init.headers.get("mcp-session-id")!;
+
+    // "restart": a brand-new server process over the same data, with an empty session map
+    const restarted = startHttpServer({ store, bus, port: 0, host: "127.0.0.1", webDir, mcpDefaultRepo: "default" });
+    try {
+      const call = await fetch(`${restarted.url}/mcp`, {
+        method: "POST",
+        headers: { ...headers, "mcp-session-id": sid, "x-tracepaper-repo": "survivor" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_frames", arguments: {} } }),
+      });
+      expect(call.status).toBe(200);
+      const body = await call.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result.content[0].text).toContain("survivor");
+
+      // and the revived session keeps working for the next call too
+      const again = await fetch(`${restarted.url}/mcp`, {
+        method: "POST",
+        headers: { ...headers, "mcp-session-id": sid },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} }),
+      });
+      expect((await again.json()).result.tools.length).toBeGreaterThan(0);
+    } finally {
+      restarted.stop();
+    }
+  });
+
   test("a full MCP HTTP client shares the server; two clients get independent canvases", async () => {
     const connect = async (repo: string): Promise<Client> => {
       const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp?repo=${repo}`));

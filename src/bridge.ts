@@ -14,6 +14,9 @@
  */
 import { resolveRepo } from "./repo.ts";
 
+/** How long a bridge waits out a shared-server restart before giving up. */
+const RESTART_GRACE_MS = 20_000;
+
 export async function runBridge(serverUrl: string): Promise<void> {
   const repo = resolveRepo(process.env, process.cwd());
   const endpoint = `${serverUrl.replace(/\/+$/, "")}/mcp`;
@@ -21,22 +24,66 @@ export async function runBridge(serverUrl: string): Promise<void> {
   const log = (m: string): void => void process.stderr.write(`[tracepaper bridge] ${m}\n`);
   log(`canvas "${repo}" → shared server ${endpoint}`);
 
-  const forward = async (line: string): Promise<void> => {
+  // The client's own initialize, kept so a lost session can be re-established on its behalf.
+  let initializeLine: string | null = null;
+
+  const post = (body: string): Promise<Response> => {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       "x-tracepaper-repo": repo,
     };
     if (sessionId !== null) headers["mcp-session-id"] = sessionId;
+    return fetch(endpoint, { method: "POST", headers, body });
+  };
 
-    let res: Response;
-    try {
-      res = await fetch(endpoint, { method: "POST", headers, body: line });
-    } catch (error) {
-      // The shared server vanished mid-session. Exit non-zero so the MCP client restarts us — and
-      // the next launch, finding no live server, falls back to a self-contained stdio server.
-      log(`shared server unreachable (${String(error)}) — exiting for a clean restart`);
-      process.exit(1);
+  /** POST, riding out a shared-server restart: retry connection errors for up to ~20s. */
+  const postWithRetry = async (body: string): Promise<Response> => {
+    const deadline = Date.now() + RESTART_GRACE_MS;
+    let delay = 250;
+    for (;;) {
+      try {
+        return await post(body);
+      } catch (error) {
+        if (Date.now() > deadline) {
+          // Gone for good. Exit non-zero so the MCP client restarts us — and the next launch,
+          // finding no live server, falls back to a self-contained stdio server.
+          log(`shared server unreachable for ${RESTART_GRACE_MS / 1000}s (${String(error)}) — exiting`);
+          process.exit(1);
+        }
+        await Bun.sleep(delay);
+        delay = Math.min(delay * 2, 2000);
+      }
+    }
+  };
+
+  /** Open a fresh session by replaying the client's initialize (the reply is ours, not the client's). */
+  const reinitialize = async (): Promise<void> => {
+    if (initializeLine === null) throw new Error("lost the MCP session before the client initialized");
+    sessionId = null;
+    const init = await postWithRetry(initializeLine);
+    const issued = init.headers.get("mcp-session-id");
+    if (!init.ok || issued === null || issued === "") {
+      throw new Error(`could not re-establish the MCP session (initialize answered ${init.status})`);
+    }
+    sessionId = issued;
+    await init.text();
+    await postWithRetry(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+    log("re-established the MCP session after the shared server dropped it");
+  };
+
+  const forward = async (line: string): Promise<void> => {
+    if (initializeLine === null && /"method"\s*:\s*"initialize"/.test(line)) initializeLine = line;
+
+    let res = await postWithRetry(line);
+    // A server that restarted without session resurrection answers our old session id with a 400.
+    // Re-open a session transparently and retry, so the client never sees the restart.
+    if (res.status === 400 && sessionId !== null && initializeLine !== line) {
+      const text = await res.clone().text();
+      if (/no MCP session|initialize request/i.test(text)) {
+        await reinitialize();
+        res = await postWithRetry(line);
+      }
     }
 
     const issued = res.headers.get("mcp-session-id");

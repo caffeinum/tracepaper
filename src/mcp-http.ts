@@ -13,7 +13,7 @@
  * config line scopes every agent correctly.
  */
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { isInitializeRequest, LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { tolerateAbsentToolArguments } from "./compat.ts";
 import type { Bus } from "./events.ts";
 import { createMcpServer } from "./mcp.ts";
@@ -54,23 +54,15 @@ function badRequest(message: string): Response {
  */
 export function createMcpHttpHandler(deps: McpHttpDeps): McpHttpHandler {
   const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+  const resurrecting = new Map<string, Promise<WebStandardStreamableHTTPServerTransport>>();
 
-  return async (request, url) => {
-    const sid = request.headers.get("mcp-session-id");
-    const existing = sid === null ? undefined : sessions.get(sid);
-    if (existing !== undefined) return existing.handleRequest(request);
-
-    // No live session: only an initialize request may open one.
-    if (request.method !== "POST") return badRequest("no MCP session for this request");
-    const body: unknown = await request
-      .clone()
-      .json()
-      .catch(() => null);
-    if (!isInitializeRequest(body)) return badRequest("expected an initialize request (no session)");
-
-    const repo = repoFor(request, url, deps.defaultRepo);
+  /** A fresh transport + McpServer for one connection. `fixedId` pins the session id (resurrection). */
+  const openSession = async (
+    repo: string,
+    fixedId?: string,
+  ): Promise<WebStandardStreamableHTTPServerTransport> => {
     const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
+      sessionIdGenerator: () => fixedId ?? crypto.randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: (id) => {
         sessions.set(id, transport);
@@ -88,6 +80,78 @@ export function createMcpHttpHandler(deps: McpHttpDeps): McpHttpHandler {
     // Same tolerance as the stdio path: a client may omit `arguments` on a no-arg tools/call
     // (mcpt does), which the tool's zod object would otherwise reject.
     await server.connect(tolerateAbsentToolArguments(transport));
+    return transport;
+  };
+
+  /**
+   * Sessions live in memory, so a server restart would strand every connected agent: its next call
+   * carries a session id this process never issued, and a plain 400 leaves the agent's tracepaper
+   * tools dead until the agent itself restarts. tracepaper sessions hold no state beyond the canvas,
+   * and the canvas rides on every request (the bridge sends x-tracepaper-repo each time; an HTTP
+   * client keeps its ?repo= url), so rebuild the session under the SAME id: drive a synthetic
+   * initialize + initialized through it, then serve the real request. A restart becomes invisible.
+   */
+  const resurrect = (
+    sid: string,
+    request: Request,
+    url: URL,
+  ): Promise<WebStandardStreamableHTTPServerTransport> => {
+    const pending = resurrecting.get(sid);
+    if (pending !== undefined) return pending;
+
+    const revived = (async () => {
+      const repo = repoFor(request, url, deps.defaultRepo);
+      const transport = await openSession(repo, sid);
+      const protocolVersion = request.headers.get("mcp-protocol-version") ?? LATEST_PROTOCOL_VERSION;
+      const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+      const init = await transport.handleRequest(
+        new Request(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "tracepaper-resurrect",
+            method: "initialize",
+            params: { protocolVersion, capabilities: {}, clientInfo: { name: "tracepaper-resurrect", version: "0" } },
+          }),
+        }),
+      );
+      if (!init.ok) throw new Error(`session resurrection failed: initialize answered ${init.status}`);
+      await transport.handleRequest(
+        new Request(url, {
+          method: "POST",
+          headers: { ...headers, "mcp-session-id": sid },
+          body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+        }),
+      );
+      console.error(`[tracepaper] resurrected MCP session ${sid.slice(0, 8)}… on canvas "${repo}"`);
+      return transport;
+    })().finally(() => resurrecting.delete(sid));
+    resurrecting.set(sid, revived);
+    return revived;
+  };
+
+  return async (request, url) => {
+    const sid = request.headers.get("mcp-session-id");
+    const existing = sid === null ? undefined : sessions.get(sid);
+    if (existing !== undefined) return existing.handleRequest(request);
+
+    if (request.method !== "POST") return badRequest("no MCP session for this request");
+    const body: unknown = await request
+      .clone()
+      .json()
+      .catch(() => null);
+
+    // A session id we do not know, on a non-initialize call: the server restarted under a live
+    // client. Rebuild the session instead of failing the call.
+    if (sid !== null && !isInitializeRequest(body)) {
+      const revived = await resurrect(sid, request, url);
+      return revived.handleRequest(request);
+    }
+
+    // No session: only an initialize request may open one.
+    if (!isInitializeRequest(body)) return badRequest("expected an initialize request (no session)");
+    const transport = await openSession(repoFor(request, url, deps.defaultRepo));
     return transport.handleRequest(request);
   };
 }
