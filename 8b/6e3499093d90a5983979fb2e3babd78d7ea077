@@ -1,0 +1,25 @@
+src/mcp-http.ts
+  s_7adfa64874e58c::t_1673c4dc6e1fb7 57,59-63,65,83-154
+  s_7adfa64874e58c::t_8823398c5abc72 16
+src/bridge.ts
+  s_7adfa64874e58c::t_5aa7fef64e0228 27-30,37-76,78-86
+  s_7adfa64874e58c::t_993854ca9fba39 17-19
+test/mcp-http.test.ts
+  s_7adfa64874e58c::t_8e848016bef057 127-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8b6e3499093d90a5983979fb2e3babd78d7ea077",
+  "prompts": {},
+  "sessions": {
+    "s_7adfa64874e58c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "975b994a-8f06-4151-90bc-658a84001619",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Aleksey Bykhun <theisease@gmail.com>"
+    }
+  }
+}
