@@ -126,14 +126,34 @@ exactly as before — the bridge sends it as a header, so there is no per-agent 
 { "mcpServers": { "tracepaper": { "command": "bunx", "args": ["github:caffeinum/tracepaper"] } } }
 ```
 
-**2. Direct HTTP (leanest).** If your client speaks MCP over HTTP, skip the per-agent process
-entirely and point it at `/mcp`. Scope the canvas with an `x-tracepaper-repo` header or a `?repo=`
-query (a client that can template its own agent id into either gets per-agent canvases from one
-identical config line):
+**2. Direct HTTP (leanest).** If your client speaks MCP over HTTP (Claude Code does), skip the
+per-agent process entirely and point it at `/mcp`. Tell the server which canvas the agent is on
+with **one** of these, in priority order:
+
+| how | what to send | canvas |
+| --- | --- | --- |
+| `x-tracepaper-repo` header | a canvas name | exactly that name |
+| `?repo=` query | a canvas name | exactly that name |
+| `x-tracepaper-cwd` header | the agent's working directory (absolute path) | derived on the server exactly as a stdio server derives it from its own cwd: git remote → git toplevel → folder name |
+| nothing | | `default` |
+
+`x-tracepaper-cwd` is the one to template when you run many agents: the config line is identical
+apart from each agent's folder, and every agent keeps the canvas it had as a stdio server.
+A relative or non-existent path is refused with a `400`, never quietly mapped to `default`.
 
 ```jsonc
-{ "mcpServers": { "tracepaper": { "type": "http", "url": "http://127.0.0.1:4321/mcp" } } }
+{ "mcpServers": { "tracepaper": {
+    "type": "http",
+    "url": "http://127.0.0.1:4321/mcp",
+    "headers": { "x-tracepaper-cwd": "/path/to/the/agents/folder" }
+} } }
 ```
+
+Direct HTTP has no self-start: if nothing is serving `/mcp`, the agent has no tracepaper. Keep
+the server up with `tracepaper up` before starting agents (it is idempotent), or a launchd /
+systemd unit around `tracepaper serve`. A server **restart** is invisible to connected agents:
+sessions are rebuilt on the fly from the canvas the client sends with each request, and idle
+sessions are closed after 30 minutes the same way.
 
 Rough memory for ~24 agents on one machine (measured, macOS `phys_footprint`):
 

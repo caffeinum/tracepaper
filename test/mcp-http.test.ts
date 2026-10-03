@@ -6,6 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Bus } from "../src/events.ts";
 import { startHttpServer, type HttpServer } from "../src/http.ts";
+import { createMcpHttpHandler, CWD_HEADER, type McpHttpHandler } from "../src/mcp-http.ts";
+import { resolveRepo } from "../src/repo.ts";
 import { Store } from "../src/store.ts";
 
 const webDir = mkdtempSync(join(tmpdir(), "tracepaper-mcp-web-"));
@@ -185,5 +187,80 @@ describe("MCP over HTTP", () => {
 
     await a.close();
     await b.close();
+  });
+});
+
+// ---------- driven directly (no HTTP server): canvas from cwd, idle eviction ----------
+
+
+const JSON_HEADERS = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+const INIT = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } },
+});
+const LIST_FRAMES = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_frames", arguments: {} } });
+
+async function call(handler: McpHttpHandler, body: string, headers: Record<string, string>): Promise<Response> {
+  const url = new URL("http://127.0.0.1/mcp");
+  return handler(new Request(url, { method: "POST", headers: { ...JSON_HEADERS, ...headers }, body }), url);
+}
+
+describe("MCP over HTTP — canvas from the client's cwd", () => {
+  const handler = (): McpHttpHandler =>
+    createMcpHttpHandler({ store, bus, baseUrl: () => "http://127.0.0.1", defaultRepo: "default" });
+
+  test("x-tracepaper-cwd resolves the canvas the same way a stdio server would from that cwd", async () => {
+    const cwd = process.cwd();
+    const h = handler();
+    const init = await call(h, INIT, { [CWD_HEADER]: cwd });
+    expect(init.status).toBe(200);
+    const sid = init.headers.get("mcp-session-id")!;
+    const res = await call(h, LIST_FRAMES, { "mcp-session-id": sid });
+    const text: string = (await res.json()).result.content[0].text;
+    expect(text).toContain(`"${resolveRepo({}, cwd)}"`);
+  });
+
+  test("an explicit x-tracepaper-repo beats the cwd", async () => {
+    const h = handler();
+    const init = await call(h, INIT, { [CWD_HEADER]: process.cwd(), "x-tracepaper-repo": "named-wins" });
+    const sid = init.headers.get("mcp-session-id")!;
+    const res = await call(h, LIST_FRAMES, { "mcp-session-id": sid });
+    expect((await res.json()).result.content[0].text).toContain('"named-wins"');
+  });
+
+  test("a relative or missing cwd is a loud 400, never a silent default canvas", async () => {
+    const rel = await call(handler(), INIT, { [CWD_HEADER]: "some/relative/dir" });
+    expect(rel.status).toBe(400);
+    expect((await rel.json()).error.message).toContain("absolute path");
+
+    const missing = await call(handler(), INIT, { [CWD_HEADER]: "/definitely/not/a/real/dir/xyz" });
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error.message).toContain("not an existing directory");
+  });
+});
+
+describe("MCP over HTTP — idle sessions", () => {
+  test("idle sessions are evicted, and a later call on the evicted id still works", async () => {
+    const h = createMcpHttpHandler({
+      store,
+      bus,
+      baseUrl: () => "http://127.0.0.1",
+      defaultRepo: "default",
+      idleMs: 40,
+      sweepMs: 15,
+    });
+    const init = await call(h, INIT, { "x-tracepaper-repo": "idle-canvas" });
+    const sid = init.headers.get("mcp-session-id")!;
+    expect(h.activeSessions()).toBe(1);
+
+    await Bun.sleep(150);
+    expect(h.activeSessions()).toBe(0);
+
+    const res = await call(h, LIST_FRAMES, { "mcp-session-id": sid, "x-tracepaper-repo": "idle-canvas" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.content[0].text).toContain('"idle-canvas"');
+    expect(h.activeSessions()).toBe(1);
   });
 });
