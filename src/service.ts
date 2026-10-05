@@ -292,6 +292,12 @@ async function uninstall(): Promise<number> {
   if (st.loaded) {
     const out = launchctl(["bootout", `gui/${uid()}/${p.label}`]);
     if (!out.ok) return fail(`launchctl bootout failed: ${out.out}`);
+    // bootout returns before the job is gone; only report "uninstalled" once it really is.
+    const gone = Date.now() + 15_000;
+    while (launchdState(p.label).loaded) {
+      if (Date.now() > gone) return fail(`${p.label} did not unload within 15s`);
+      await Bun.sleep(200);
+    }
   }
   rmSync(p.plistPath, { force: true });
   say(st.loaded ? `uninstalled ${p.label} (was pid ${st.pid ?? "?"})` : `${p.label} was not loaded; plist removed`);
