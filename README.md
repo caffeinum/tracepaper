@@ -149,11 +149,50 @@ A relative or non-existent path is refused with a `400`, never quietly mapped to
 } } }
 ```
 
-Direct HTTP has no self-start: if nothing is serving `/mcp`, the agent has no tracepaper. Keep
-the server up with `tracepaper up` before starting agents (it is idempotent), or a launchd /
-systemd unit around `tracepaper serve`. A server **restart** is invisible to connected agents:
-sessions are rebuilt on the fly from the canvas the client sends with each request, and idle
-sessions are closed after 30 minutes the same way.
+Direct HTTP has no self-start: if nothing is serving `/mcp`, the agent has no tracepaper. So keep
+the server running with the launchd service (below), or at least `tracepaper up` before starting
+agents (it is idempotent). A server **restart** is invisible to connected agents: sessions are
+rebuilt on the fly from the canvas the client sends with each request, and idle sessions are
+closed after 30 minutes the same way.
+
+### Keep it running: `tracepaper service` (macOS)
+
+```sh
+# from a pinned install of the version you want the service to run, e.g.
+bun add --cwd ~/.tracepaper/runtime tracepaper@<version>
+bun run ~/.tracepaper/runtime/node_modules/tracepaper/src/index.ts service install   # --port 4321 --db <path>
+tracepaper service status      # exit 0 only if launchd's process owns the port and answers healthy
+tracepaper service uninstall
+```
+
+`service install` writes a launchd agent (`~/Library/LaunchAgents/com.caffeinum.tracepaper.plist`)
+that runs `serve` from **the exact package directory you ran it from** — a versioned, pinned
+install. It refuses a package-manager cache or temp dir (`bunx`/`npx` caches get pruned under a
+running service). launchd starts it at login and restarts it if it dies (about 10 s).
+
+It binds its port **strictly**. If something else holds the port, `install` refuses and names the
+process; at boot, the service keeps retrying every 10 s instead of quietly drifting to the next
+port where no agent would find it. Re-running `install` from a newer pinned install upgrades in
+place. `tracepaper down` will not stop it (launchd would only restart it) — use `uninstall`.
+Logs go to `~/.tracepaper/service.log`.
+
+`service status` is the check that the service — not an agent, not a stale process — is what is
+serving `:4321`:
+
+```text
+service:    com.caffeinum.tracepaper — installed, loaded
+launchd pid: 42317
+:4321 owner: pid 42317
+owns :4321: YES
+health:     ok=true mcp=true version=0.10.4 frames=168
+runs:       /Users/you/.tracepaper/runtime/node_modules/tracepaper/src/index.ts
+```
+
+**Cutover from per-agent bridges to direct HTTP**, in this order: (1) stop whatever is hosting
+`:4321` today (often an agent's own tracepaper process), (2) `service install`, (3) `service status`
+must exit 0, (4) switch agents to the direct `type: "http"` entry. If an agent goes direct while an
+older (< 0.10.3) server still holds the port, its `x-tracepaper-cwd` header is ignored and its
+frames land on `default`.
 
 Rough memory for ~24 agents on one machine (measured, macOS `phys_footprint`):
 

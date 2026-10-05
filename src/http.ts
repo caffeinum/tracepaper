@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
+import { SERVER_VERSION } from "./mcp.ts";
 import { createMcpHttpHandler, type McpHttpHandler } from "./mcp-http.ts";
 import { findChrome, renderCached, renderPng } from "./screenshot.ts";
 import type { Store } from "./store.ts";
@@ -59,6 +60,8 @@ export type HttpServerOptions = {
    * on; agents pick their own via the `x-tracepaper-repo` header (the bridge) or a `?repo=` query.
    */
   mcpDefaultRepo?: string;
+  /** Bind exactly `port` or throw — no fallback to the next free port. */
+  strictPort?: boolean;
 };
 
 export type HttpServer = {
@@ -96,7 +99,7 @@ export function startHttpServer(options: HttpServerOptions): HttpServer {
   const handler = (request: Request): Response | Promise<Response> =>
     route({ request, store, bus, webDir, closeStream, tunnel, mcp, port: portRef.port });
 
-  const server = listen(handler, port, host);
+  const server = listen(handler, port, host, options.strictPort === true);
   const bound = server.port;
   if (bound === undefined) throw new Error(`Bun.serve bound no TCP port on ${host}`);
   portRef.port = bound;
@@ -133,11 +136,13 @@ function listen(
   fetch: (request: Request) => Response | Promise<Response>,
   port: number,
   hostname: string,
+  strict: boolean,
 ): BunServer {
   if (port === 0) return Bun.serve({ port: 0, hostname, idleTimeout: SSE_IDLE_TIMEOUT_S, fetch });
 
   const errors: string[] = [];
-  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+  const attempts = strict ? 1 : MAX_PORT_ATTEMPTS;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const candidate = port + attempt;
     try {
       return Bun.serve({ port: candidate, hostname, idleTimeout: SSE_IDLE_TIMEOUT_S, fetch });
@@ -145,6 +150,7 @@ function listen(
       errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  if (strict) throw new Error(`port ${port} on ${hostname} is taken (strict port, no fallback): ${errors.join("; ")}`);
   throw new Error(
     `no free port in ${port}..${port + MAX_PORT_ATTEMPTS - 1} on ${hostname}\n${errors.join("\n")}`,
   );
@@ -307,7 +313,9 @@ function handleShareStop(ctx: Context): Response {
 
 function handleHealth(ctx: Context): Response {
   const { frames, comments } = ctx.store.counts();
-  return json(HealthSchema.parse({ ok: true, frames, comments, mcp: ctx.mcp !== undefined }));
+  return json(
+    HealthSchema.parse({ ok: true, frames, comments, mcp: ctx.mcp !== undefined, version: SERVER_VERSION }),
+  );
 }
 
 function handleListRepos(ctx: Context): Response {

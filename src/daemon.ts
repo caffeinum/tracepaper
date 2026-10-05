@@ -116,6 +116,15 @@ export async function down(config: Config): Promise<number> {
     return 0;
   }
 
+  // A launchd-managed server would just be restarted by KeepAlive; stopping it is uninstall's job.
+  const { servicePid } = await import("./service.ts");
+  if (servicePid() === pid) {
+    process.stderr.write(
+      `[tracepaper] pid ${pid} is the launchd service — \`tracepaper service uninstall\` stops it for good.\n`,
+    );
+    return 1;
+  }
+
   try {
     process.kill(pid, "SIGTERM");
   } catch {

@@ -344,5 +344,7 @@ export const HealthSchema = z.object({
   // True when this server also speaks MCP over HTTP at /mcp, so a joining agent bridges to it
   // instead of running its own stdio MCP server. Optional so older servers still validate.
   mcp: z.boolean().optional(),
+  // The running server's version, so a pinned service install can be verified from outside.
+  version: z.string().optional(),
 });
 export type Health = z.infer<typeof HealthSchema>;

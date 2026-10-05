@@ -16,6 +16,7 @@ beforeAll(() => {
     dbPath: join(dir, "paper.db"),
     stateDir: dir,
     serverJsonPath: join(dir, "server.json"),
+    strictPort: false,
   };
 });
 

@@ -18,6 +18,11 @@ export type Config = {
   dbPath: string;
   stateDir: string;
   serverJsonPath: string;
+  /**
+   * Bind exactly `port` or fail, instead of falling back to the next free one. The launchd service
+   * sets this: a service that silently landed on 4322 would hide the very race it exists to remove.
+   */
+  strictPort: boolean;
 };
 
 export function expandHome(path: string): string {
@@ -34,6 +39,12 @@ function parsePort(raw: string, name: string): number {
     throw new Error(`${name} must be an integer in 0..65535, got: ${raw}`);
   }
   return port;
+}
+
+function parseFlag(raw: string, name: string): boolean {
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  throw new Error(`${name} must be 1/0/true/false, got: ${raw}`);
 }
 
 function resolveDbPath(raw: string): string {
@@ -81,6 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const rawPort = fromEnv(env, "PORT");
   const rawHost = fromEnv(env, "HOST");
   const rawDb = fromEnv(env, "DB");
+  const rawStrict = fromEnv(env, "STRICT_PORT");
 
   if (rawHost !== undefined && rawHost.value.trim() === "") {
     throw new Error(`${rawHost.name} is set but empty`);
@@ -98,5 +110,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath,
     stateDir,
     serverJsonPath: resolve(stateDir, "server.json"),
+    strictPort: rawStrict === undefined ? false : parseFlag(rawStrict.value, rawStrict.name),
   };
 }

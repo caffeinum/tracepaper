@@ -96,6 +96,7 @@ async function runServer(mode: Mode, config: Config): Promise<void> {
     bus,
     port: config.port,
     host: config.host,
+    strictPort: config.strictPort,
     tunnel,
     // Expose MCP over HTTP so every other agent can share this one server (see `tracepaper up`).
     // Agents scope themselves via the x-tracepaper-repo header (the bridge) or a ?repo= query; a
@@ -164,6 +165,12 @@ async function main(): Promise<void> {
     const daemon = await import("./daemon.ts");
     const run = normalized === "up" ? daemon.up : normalized === "down" ? daemon.down : daemon.status;
     process.exit(await run(loadConfig()));
+  }
+
+  // The shared server as a launchd agent (macOS): install / uninstall / status.
+  if (normalized === "service") {
+    const { runService } = await import("./service.ts");
+    process.exit(await runService(rest));
   }
 
   const mode = parseMode(process.argv.slice(2));
