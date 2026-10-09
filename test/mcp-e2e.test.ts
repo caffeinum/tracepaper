@@ -32,10 +32,12 @@ const TOOL_NAMES = [
   "add_section",
   "add_text",
   "delete_frame",
+  "get_comment",
   "get_comments",
   "get_frame",
   "list_canvases",
   "list_frames",
+  "move_frame",
   "push_html",
   "reply_to_comment",
   "resolve_comment",
@@ -253,6 +255,36 @@ test("push_html with the same frameId updates in place, bumps version, adds no f
   });
 });
 
+test("move_frame and push_html x/y reposition without dropping comments", async () => {
+  await withServer(async (s) => {
+    const frame = await s.pushHtml({ html: "<p>placed</p>", name: "Placed", x: 10, y: 20 });
+    const note = await s.humanComment(frame.frameId, 3, 4, "keep me");
+
+    const moved = await s.call("move_frame", { frameId: frame.frameId, x: 400, y: 500 });
+    expect(moved.isError).toBeUndefined();
+    expect(textOf(moved)).toContain("(400, 500)");
+
+    const afterMove = (await s.listFrames()).frames[0];
+    if (afterMove === undefined) throw new Error("frame missing after move");
+    expect(afterMove.x).toBe(400);
+    expect(afterMove.y).toBe(500);
+    expect(afterMove.commentCount).toBe(1);
+
+    const updated = await s.pushHtml({
+      frameId: frame.frameId,
+      html: "<p>moved with html</p>",
+      x: 12,
+      y: 34,
+    });
+    expect(updated.frameId).toBe(frame.frameId);
+    const afterPush = (await s.listFrames()).frames[0];
+    if (afterPush === undefined) throw new Error("frame missing after push");
+    expect(afterPush.x).toBe(12);
+    expect(afterPush.y).toBe(34);
+    expect((await s.getComments({ frameId: frame.frameId })).comments.map((c) => c.id)).toEqual([note.id]);
+  });
+});
+
 // ---------- d ----------
 
 test("push_html with a bogus frameId is a tool error and creates nothing", async () => {
@@ -460,6 +492,14 @@ test("delete_frame removes the frame and cascades its comments", async () => {
     await s.call("reply_to_comment", { commentId: rootComment.id, text: "so does this" });
     expect(await s.json("/api/health")).toMatchObject({ frames: 2, comments: 3 });
 
+    // An open human thread blocks delete — that is what delete+recreate was destroying.
+    const blocked = await s.call("delete_frame", { frameId: doomed.frameId });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toContain("unresolved human comment");
+    expect((await s.listFrames()).frames.map((f) => f.id)).toContain(doomed.frameId);
+
+    expect((await s.call("resolve_comment", { commentId: rootComment.id })).isError).toBeUndefined();
+
     const deleted = await s.call("delete_frame", { frameId: doomed.frameId });
     expect(deleted.isError).toBeUndefined();
     expect(textOf(deleted)).toContain(doomed.frameId);
@@ -630,6 +670,39 @@ test("get_frame reads the current html back, so an update cannot silently discar
     const missing = await s.call("get_frame", { frameId: "frm_000000000000" });
     expect(missing.isError).toBe(true);
     expect(textOf(missing)).toContain("list_frames");
+  });
+});
+
+test("get_comment reads the one note the human pointed at, even after it is resolved", async () => {
+  await withServer(async (s) => {
+    const frame = await s.pushHtml({ html: "<p>v1</p>", name: "Hero", width: 640, height: 480 });
+    const note = await s.humanComment(frame.frameId, 12, 34, "make the title bigger");
+    await s.humanComment(frame.frameId, 1, 1, "unrelated");
+
+    const read = await s.call("get_comment", { commentId: note.id });
+    expect(read.isError).toBeUndefined();
+    const text = textOf(read);
+    expect(text).toContain("make the title bigger");
+    expect(text).toContain(note.id);
+    expect(text).toContain(frame.frameId);
+    expect(text).not.toContain("unrelated");
+
+    const structured = read.structuredContent as {
+      comment: { id: string; text: string };
+      frame: { id: string; name: string; repo: string };
+    };
+    expect(structured.comment.id).toBe(note.id);
+    expect(structured.comment.text).toBe("make the title bigger");
+    expect(structured.frame.id).toBe(frame.frameId);
+    expect(structured.frame.name).toBe("Hero");
+
+    expect((await s.call("resolve_comment", { commentId: note.id })).isError).toBeUndefined();
+    const resolved = textOf(await s.call("get_comment", { commentId: note.id }));
+    expect(resolved).toContain("make the title bigger");
+    expect(resolved).toContain("Resolved");
+
+    const missing = await s.call("get_comment", { commentId: "cmt_000000000000" });
+    expect(missing.isError).toBe(true);
   });
 });
 

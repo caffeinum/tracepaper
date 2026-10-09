@@ -92,9 +92,9 @@ curl -fsS "$BASE/api/health" >/dev/null || fail "http server never came up (see 
 
 # ---------- the loop ----------
 
-step "tools — all eight are advertised to an outside client"
+step "tools — the agent surface is advertised to an outside client"
 TOOLS="$(TRACEPAPER_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
-for tool in push_html get_comments get_frame list_frames resolve_comment reply_to_comment tidy_canvas delete_frame; do
+for tool in push_html get_comment get_comments get_frame list_frames move_frame resolve_comment reply_to_comment tidy_canvas delete_frame; do
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
 
@@ -150,6 +150,12 @@ want "$COMMENT" "$SEEN" "get_comments did not return $COMMENT"
 want "tighten the header" "$SEEN" "the comment text did not round-trip through mcpt"
 want "(412,233)" "$SEEN" "the pin coordinates did not round-trip"
 
+step "get_comment — the pasted id, not the whole list"
+ONE="$(mcp get_comment "{\"commentId\":\"$COMMENT\"}")"
+want "tighten the header" "$ONE" "get_comment did not return the note the human pointed at"
+want "$COMMENT" "$ONE" "get_comment did not name the comment"
+want "$FRAME" "$ONE" "get_comment did not name the frame"
+
 step 'cursor — polling with `since` returns only what is new'
 # The cursor is an opaque feed position handed back in the result text, NOT a comment id: an id
 # is re-resolved through that row's live state, so resolving it would skip whatever the human
@@ -195,7 +201,19 @@ WITH_RESOLVED="$(mcp get_comments "{\"frameId\":\"$FRAME\",\"includeResolved\":t
 want "- $COMMENT " "$WITH_RESOLVED" "includeResolved does not bring the resolved comment back"
 want "shipped in v2" "$WITH_RESOLVED" "resolve_comment's note was never posted as an agent reply"
 
-step "delete_frame — removes the frame and cascades its comments"
+step "delete_frame — refuses an open human thread, then removes the frame once they are closed"
+BLOCKED="$(mcp_err delete_frame "{\"frameId\":\"$FRAME\"}")"
+want "unresolved human" "$BLOCKED" "delete_frame did not refuse an open human thread"
+# The loop left later notes unresolved on purpose. Close every open human root, then delete is allowed.
+OPEN="$(curl -fsS "$BASE/api/comments?frameId=$FRAME" | bun -e '
+  const doc = JSON.parse(await Bun.stdin.text());
+  for (const comment of doc.comments ?? []) {
+    if (comment.parentId === null && comment.author === "human" && comment.resolved === false) console.log(comment.id);
+  }
+')"
+for id in $OPEN; do
+  mcp resolve_comment "{\"commentId\":\"$id\"}" >/dev/null
+done
 DELETED="$(mcp delete_frame "{\"frameId\":\"$FRAME\"}")"
 want "$FRAME" "$DELETED" "delete_frame did not name the frame"
 equal "$(health frames)" "0" "the frame survived delete_frame"

@@ -22,6 +22,8 @@ export type UpdateFramePatch = {
   name?: string;
   width?: number;
   height?: number;
+  x?: number;
+  y?: number;
 };
 
 const FRAME_GAP = 120;
@@ -353,6 +355,8 @@ export class Store {
                   name      = COALESCE($name, name),
                   width     = COALESCE($width, width),
                   height    = COALESCE($height, height),
+                  x         = COALESCE($x, x),
+                  y         = COALESCE($y, y),
                   version   = version + 1,
                   updatedAt = $updatedAt
             WHERE id = $id
@@ -363,6 +367,8 @@ export class Store {
           $name: patch.name ?? null,
           $width: patch.width ?? null,
           $height: patch.height ?? null,
+          $x: patch.x ?? null,
+          $y: patch.y ?? null,
           $updatedAt: nowIso(),
           $id: frameId,
         }) as FrameRow | null;
@@ -697,22 +703,65 @@ export class Store {
   }
 
   /**
-   * Re-packs every frame from scratch, biggest first, preserving nothing but the frames
-   * themselves. For a canvas that already overlaps — because it was built before placement
-   * became collision-aware, or because an agent placed frames by hand badly.
+   * Re-packs frames, biggest first, so nothing overlaps.
+   *
+   * With no scope, every frame on the canvas is placed from scratch (positions are not preserved).
+   * With `frameIds` and/or a y-range, only those frames move; the rest stay put and act as obstacles
+   * so a scoped tidy cannot shove someone else's work aside.
    */
-  tidyFrames(repo: string): FrameSummary[] {
+  tidyFrames(
+    repo: string,
+    scope: { frameIds?: readonly string[]; yMin?: number; yMax?: number } = {},
+  ): FrameSummary[] {
+    const { frameIds, yMin, yMax } = scope;
+    if ((yMin === undefined) !== (yMax === undefined)) {
+      throw new Error("tidyFrames: pass both yMin and yMax, or neither");
+    }
+    if (yMin !== undefined && yMax !== undefined && yMin > yMax) {
+      throw new Error(`tidyFrames: yMin (${yMin}) is greater than yMax (${yMax})`);
+    }
     return this.db
       .transaction(() => {
         const frames = this.db
           .query(
-            "SELECT id, width, height FROM frames WHERE repo = $repo ORDER BY height DESC, width DESC, createdAt ASC",
+            `SELECT id, width, height, x, y FROM frames WHERE repo = $repo
+              ORDER BY height DESC, width DESC, createdAt ASC`,
           )
-          .all({ $repo: repo }) as { id: string; width: number; height: number }[];
+          .all({ $repo: repo }) as {
+          id: string;
+          width: number;
+          height: number;
+          x: number;
+          y: number;
+        }[];
 
-        const placed: Box[] = [];
+        const wanted = frameIds === undefined ? null : new Set(frameIds);
+        if (wanted !== null) {
+          const known = new Set(frames.map((frame) => frame.id));
+          for (const id of wanted) {
+            if (!known.has(id)) {
+              throw new Error(
+                `unknown frame: ${id} — call list_frames for the current frame ids, or omit frameId to create a new frame.`,
+              );
+            }
+          }
+        }
+
+        const moving = frames.filter((frame) => {
+          if (wanted !== null && !wanted.has(frame.id)) return false;
+          if (yMin !== undefined && yMax !== undefined && (frame.y < yMin || frame.y > yMax)) return false;
+          return true;
+        });
+        const fixed = frames.filter((frame) => !moving.some((m) => m.id === frame.id));
+
+        const placed: Box[] = fixed.map((frame) => ({
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: frame.height,
+        }));
         const update = this.db.query("UPDATE frames SET x = $x, y = $y WHERE id = $id");
-        for (const frame of frames) {
+        for (const frame of moving) {
           const at =
             placed.length === 0 ? { x: 0, y: 0 } : findFreeSlot(placed, frame.width, frame.height);
           placed.push({ x: at.x, y: at.y, width: frame.width, height: frame.height });

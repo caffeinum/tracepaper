@@ -704,14 +704,34 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
     openComposer(current.id, point.x - current.x + scroll.x, point.y - current.y + scroll.y);
     setTool("select");
   });
-  catcher.addEventListener("click", () => {
+  catcher.addEventListener("click", (event) => {
     // Only the select tool picks frames; the pan tool leaves selection alone, comment drops a pin.
     if (tool !== "select") return;
+    // detail >= 2 is the second click of a double-click. Some browsers deliver this click but
+    // swallow dblclick when an ancestor captured the pointer, so enter interactive here too.
+    if (event.detail >= 2) {
+      setInteractive(frame.id);
+      return;
+    }
     setSelected(frame.id);
   });
-  catcher.addEventListener("dblclick", () => {
+  // Double-click anywhere on the frame (body or title) enters interactive mode. Listening on the
+  // root, not only the catcher, so a double-click on the label still counts. Pins, the leave-hint
+  // and the delete/save chrome are excluded.
+  const enterInteractive = (event: Event): void => {
     if (tool !== "select") return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest(".pin, .frame-hint, .frame-kill, .frame-save") !== null
+    ) {
+      return;
+    }
     setInteractive(frame.id);
+  };
+  root.addEventListener("dblclick", enterInteractive);
+  root.addEventListener("click", (event) => {
+    if (event.detail >= 2) enterInteractive(event);
   });
 
   // Two SVG passes for the hand-drawn edge. The fill pass sits behind the iframe (paper backing so
@@ -872,7 +892,7 @@ function updateFrameDetail(): void {
   const stageArea = sw * sh;
   if (stageArea <= 0) return;
   for (const [id, node] of frameNodes) {
-    if (node.kind !== "html" || node.desiredSrc === "") continue;
+    if (node.kind !== "html") continue;
     const frame = frames.get(id);
     if (!frame) continue;
     // The frame's on-screen rectangle (world corners → stage px), intersected with the viewport.
@@ -881,21 +901,34 @@ function updateFrameDetail(): void {
     const ix = Math.max(0, Math.min(br.x, sw) - Math.max(tl.x, 0));
     const iy = Math.max(0, Math.min(br.y, sh) - Math.max(tl.y, 0));
     const coverage = (ix * iy) / stageArea;
-    const dominant = coverage > DOMINANT_COVERAGE;
-    if (dominant && !node.loaded) {
-      // Go live. Keep the thumb painted and the iframe hidden until the iframe has actually loaded;
-      // only then reveal the iframe and drop the thumb, so the swap never shows a blank paper card.
-      node.loaded = true;
-      node.iframe.onload = () => {
+    const dominant = coverage > DOMINANT_COVERAGE || id === interactiveFrameId;
+    const interactive = id === interactiveFrameId;
+    if ((dominant || interactive) && node.kind === "html") {
+      const src = node.desiredSrc !== "" ? node.desiredSrc : `/f/${frame.id}?v=${frame.version}`;
+      node.desiredSrc = src;
+      if (!node.loaded) {
+        node.loaded = true;
+        node.iframe.onload = () => {
+          node.iframe.style.opacity = "1";
+          node.thumb.hidden = true;
+          node.root.classList.add("is-live");
+        };
+        // Visible to hit-testing immediately. Opacity 0 until load so the thumb still shows,
+        // but the iframe is the event target — otherwise the catcher/thumb eat the click.
+        node.iframe.style.opacity = "0";
         node.iframe.hidden = false;
-        node.thumb.hidden = true;
-      };
-      node.iframe.src = node.desiredSrc;
-    } else if (!dominant && node.loaded) {
-      // Revert to the thumbnail and free the live document's memory.
+        node.iframe.src = src;
+      } else if (node.iframe.hidden) {
+        node.iframe.hidden = false;
+        if (node.iframe.style.opacity === "") node.iframe.style.opacity = "1";
+      }
+      if (interactive) node.root.classList.add("is-live");
+    } else if (!dominant && !interactive && node.loaded) {
+      node.root.classList.remove("is-live");
+      node.iframe.style.opacity = "";
       node.thumb.hidden = false;
       node.iframe.onload = null;
-      node.iframe.removeAttribute("src"); // navigates to about:blank, freeing the document's memory
+      node.iframe.removeAttribute("src");
       node.iframe.hidden = true;
       node.loaded = false;
     }
@@ -918,19 +951,27 @@ function makeDraggable(handle: HTMLElement, frameId: string): void {
     if (event.button !== 0 || tool !== "select" || spaceHeld) return;
     const frame = frames.get(frameId);
     if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
-    event.preventDefault();
-    event.stopPropagation(); // the stage would otherwise start panning
+    // Stop the stage from arming a pan, but do NOT preventDefault or capture yet. Both suppress
+    // the click/dblclick that follows a stationary press — which is why a double-click on the
+    // title selected the frame and never entered interactive mode.
+    event.stopPropagation();
 
     const node = frameNodes.get(frameId);
     if (!node) throw new Error(`drag started on a frame with no node: ${frameId}`);
     setSelected(frameId);
 
+    const startScreen = { x: event.clientX, y: event.clientY };
     const startWorld = screenToWorld(stagePoint(event));
     const origin = { x: frame.x, y: frame.y };
     let next = origin;
-    handle.setPointerCapture(event.pointerId);
+    let dragging = false;
 
     const onMove = (move: PointerEvent): void => {
+      if (!dragging) {
+        if (Math.hypot(move.clientX - startScreen.x, move.clientY - startScreen.y) < 4) return;
+        dragging = true;
+        handle.setPointerCapture(move.pointerId);
+      }
       const world = screenToWorld(stagePoint(move));
       next = {
         x: Math.round(origin.x + (world.x - startWorld.x)),
@@ -943,7 +984,8 @@ function makeDraggable(handle: HTMLElement, frameId: string): void {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
-      if (next.x === origin.x && next.y === origin.y) return;
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      if (!dragging) return;
 
       // Optimistic locally, then persisted; a failure snaps back rather than lying.
       putFrame({ ...frame, x: next.x, y: next.y });
@@ -1154,6 +1196,70 @@ function openComposer(frameId: string, contentX: number, contentY: number): void
   input.focus();
 }
 
+function copyGlyph(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "currentColor");
+  path.setAttribute(
+    "d",
+    "M5.2 2.2h6.2c.7 0 1.3.6 1.3 1.3v6.2h-1.4V3.6H5.2V2.2zM3.2 4.6h6.2c.7 0 1.3.6 1.3 1.3v6.6c0 .7-.6 1.3-1.3 1.3H3.2c-.7 0-1.3-.6-1.3-1.3V5.9c0-.7.6-1.3 1.3-1.3zm0 1.2v6.6h6.2V5.8H3.2z",
+  );
+  svg.appendChild(path);
+  return svg;
+}
+
+function checkGlyph(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.8");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("d", "M3.5 8.2 6.4 11.1 12.5 4.8");
+  svg.appendChild(path);
+  return svg;
+}
+
+/** The line the human pastes to an agent. get_comment reads the cmt_ id; the frame id is context. */
+function commentLink(comment: CanvasComment): string {
+  return `comment ${comment.id} frame ${comment.frameId}`;
+}
+
+function copyIdButton(comment: CanvasComment): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "copy-id";
+  btn.title = "Copy comment id";
+  btn.setAttribute("aria-label", `Copy comment id ${comment.id}`);
+  btn.appendChild(copyGlyph());
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    navigator.clipboard
+      .writeText(commentLink(comment))
+      .then(() => {
+        btn.classList.add("is-copied");
+        btn.title = "Copied";
+        btn.setAttribute("aria-label", "Copied");
+        btn.replaceChildren(checkGlyph());
+        window.setTimeout(() => {
+          if (!btn.isConnected) return;
+          btn.classList.remove("is-copied");
+          btn.title = "Copy comment id";
+          btn.setAttribute("aria-label", `Copy comment id ${comment.id}`);
+          btn.replaceChildren(copyGlyph());
+        }, 1200);
+      })
+      .catch(fail);
+  });
+  return btn;
+}
+
 function messageNode(comment: CanvasComment, isReply: boolean): HTMLDivElement {
   const node = document.createElement("div");
   node.className = "msg";
@@ -1175,6 +1281,7 @@ function messageNode(comment: CanvasComment, isReply: boolean): HTMLDivElement {
     tag.textContent = "resolved";
     head.appendChild(tag);
   }
+  head.appendChild(copyIdButton(comment));
 
   const text = document.createElement("div");
   text.className = "msg-text";
@@ -1320,11 +1427,15 @@ function renderSidebar(): void {
     for (const comment of ordered) {
       const number = numbers.get(comment.id);
       if (number === undefined) throw new Error(`no pin number for ${comment.id}`);
-      const entry = document.createElement("button");
-      entry.type = "button";
+      const entry = document.createElement("div");
       entry.className = "entry";
+      entry.setAttribute("role", "listitem");
       entry.classList.toggle("is-resolved", comment.resolved);
       entry.classList.toggle("is-active", openThreadId === comment.id);
+
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "entry-open";
 
       const badge = document.createElement("span");
       badge.className = "entry-num";
@@ -1354,8 +1465,8 @@ function renderSidebar(): void {
       }
 
       body.append(text, meta);
-      entry.append(badge, body);
-      entry.addEventListener("click", () => {
+      open.append(badge, body);
+      open.addEventListener("click", () => {
         const target = frames.get(comment.frameId);
         if (!target) throw new Error(`unknown frame: ${comment.frameId}`);
         // comment.x/y are content coords; pan to where the pin currently sits (content − scroll).
@@ -1363,6 +1474,7 @@ function renderSidebar(): void {
         panTo(target.x + comment.x - scroll.x, target.y + comment.y - scroll.y, Math.max(view.scale, 0.7));
         openThread(comment.id);
       });
+      entry.append(open, copyIdButton(comment));
       commentList.appendChild(entry);
     }
   }
@@ -1419,13 +1531,17 @@ function setTool(next: Tool): void {
 }
 
 function setInteractive(frameId: string | null): void {
+  if (frameId !== null && frameId === interactiveFrameId) return;
   interactiveFrameId = frameId;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-interactive", id === frameId);
-  // Stepping into a frame means you want to use the page, so give it the whole viewport.
+  // Stepping into a frame means you want to use the page, so give it the whole viewport and force
+  // the live iframe on — coverage alone misses small frames, which then look selected (orange) but
+  // stay a dead thumbnail because the catcher has already dropped pointer events.
   if (frameId !== null) {
     setSelected(frameId);
     fitFrame(frameId);
   }
+  updateFrameDetail();
 }
 
 function setSelected(frameId: string | null): void {
@@ -1562,19 +1678,17 @@ let pendingPan = false;
 stage.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (target instanceof Element && target.closest(IGNORE_PAN)) return;
-  const frameEl = target instanceof Element ? target.closest(".frame-catch")?.closest(".frame") : null;
+  const frameEl = target instanceof Element ? target.closest(".frame") : null;
   const onFrame = frameEl instanceof HTMLElement;
   const middle = event.button === 1;
   const left = event.button === 0;
   if (!middle && !left) return;
   // The pan tool and held space pan over anything, including frames. Otherwise a left press on a
-  // frame belongs to that frame: comment mode drops a pin, and an interactive frame keeps its own
-  // pointer events. A middle drag always pans.
+  // frame belongs to that frame: select double-click enters it, comment drops a pin. Arming a pan
+  // here captures the pointer on a few px of jitter and swallows the dblclick — the frame ends up
+  // selected ("focused") and never interactive. A middle drag always pans.
   const panOverride = middle || tool === "pan" || spaceHeld;
-  if (!panOverride) {
-    if (left && tool === "comment" && onFrame) return;
-    if (left && onFrame && frameEl.dataset["frameId"] === interactiveFrameId) return;
-  }
+  if (!panOverride && left && onFrame && (tool === "select" || tool === "comment")) return;
 
   pendingPan = true;
   panPointer = event.pointerId;
@@ -1645,14 +1759,28 @@ window.addEventListener(
   { passive: false, capture: true },
 );
 
+function pointerInsideFrame(frameId: string, event: { clientX: number; clientY: number }): boolean {
+  const node = frameNodes.get(frameId);
+  if (!node) return false;
+  const rect = node.root.getBoundingClientRect();
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  );
+}
+
 stage.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
   if (target.closest(".panel") !== null || target.closest(".pin") !== null) return;
   if (panel) closePanel();
   const frameEl = target.closest(".frame");
-  if (interactiveFrameId !== null && (!(frameEl instanceof HTMLElement) || frameEl.dataset["frameId"] !== interactiveFrameId)) {
-    setInteractive(null);
+  if (interactiveFrameId !== null && !pointerInsideFrame(interactiveFrameId, event)) {
+    const onThis =
+      frameEl instanceof HTMLElement && frameEl.dataset["frameId"] === interactiveFrameId;
+    if (!onThis) setInteractive(null);
   }
   // Only the select tool clears the selection on an empty click — panning or commenting should
   // leave the current selection (and its ⌘0 framing) intact.

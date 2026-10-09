@@ -5,6 +5,7 @@ import type { Store } from "./store.ts";
 import {
   AddSectionResultSchema,
   AddTextResultSchema,
+  GetCommentResultSchema,
   GetCommentsResultSchema,
   ListCanvasesResultSchema,
   ListFramesResultSchema,
@@ -13,17 +14,21 @@ import {
   addSectionShape,
   addTextShape,
   deleteFrameShape,
+  getCommentShape,
   getCommentsShape,
   getFrameShape,
   listCanvasesShape,
   listFramesShape,
+  moveFrameShape,
   pushHtmlShape,
   replyToCommentShape,
   resolveCommentShape,
+  tidyCanvasShape,
   type AddSectionResult,
   type AddTextResult,
   type Comment,
   type FrameSummary,
+  type GetCommentResult,
   type GetCommentsResult,
   type GetFrameResult,
   type ListCanvasesResult,
@@ -51,10 +56,11 @@ const PUSH_HTML_DESCRIPTION = [
   "partial update, so call get_frame first if you did not author the current HTML this session.",
   "Omit frameId to add a new frame; it is auto-placed beside the last one and wraps onto a new row",
   "so the canvas stays readable instead of growing into one endless strip. Pass frameId to replace",
-  "that frame's HTML in place — the version bumps and existing comments survive. An unknown frameId",
-  "is an error, never a silent create.",
+  "that frame's HTML in place (version bumps, comments survive). You may also pass x/y on an update",
+  "to reposition the existing frame without deleting it. An unknown frameId is an error, never a",
+  "silent create.",
   "",
-  "LAYOUT: you can place frames yourself with x/y (world px) instead of accepting auto-placement,",
+  "LAYOUT: you can place (or reposition on update) frames yourself with x/y (world px) instead of accepting auto-placement,",
   "and you should whenever the arrangement carries meaning. Put variants of one thing side by side",
   "on a shared y so they read as a row and can be compared; start an unrelated topic on a new row",
   "by stepping y down past the tallest frame above it (add ~120px of gutter). Reserve auto-placement",
@@ -89,8 +95,18 @@ const ADD_SECTION_DESCRIPTION = [
   "just draws a labeled box behind them. Pass x/y/width/height to enclose the cluster.",
 ].join("\n");
 
+const GET_COMMENT_DESCRIPTION = [
+  "Read exactly one comment by id. Use this when the human hands you a comment — they copy a line",
+  "like `comment cmt_… frame frm_…` from the canvas (the copy icon on the note). Pass the cmt_ id.",
+  "Do not call get_comments first, and do not list the canvas to find it.",
+  "Returns that comment even if it is already resolved, plus the frame it sits on (name, size,",
+  "version, and whether the note is stale). Reply with reply_to_comment, or resolve_comment once",
+  "you have acted on it.",
+].join("\n");
+
 const GET_COMMENTS_DESCRIPTION = [
   "Read the human's feedback left on the canvas. This is the other half of push_html.",
+  "If the human handed you a specific comment id, call get_comment instead of listing.",
   "Returns comments oldest-first plus an opaque `cursor` — pass it back as `since` next call to get",
   "only what is new. Keep the cursor, not a timestamp: `since` accepts an ISO timestamp too, but",
   "that matches only comments CREATED after it, so a comment the human edited or re-opened never",
@@ -145,16 +161,27 @@ const GET_FRAME_DESCRIPTION = [
   "silently discards whatever is already there.",
 ].join("\n");
 
+const MOVE_FRAME_DESCRIPTION = [
+  "Move an existing frame to a new (x, y) position on its canvas without touching its HTML or comments.",
+  "This is the safe way to reposition; delete + recreate drops all comments on that frame (including",
+  "unresolved human threads). x/y are in world pixels. Use list_frames first to see current positions.",
+  "Batch move is not yet supported; call once per frame or use push_html with x/y on update.",
+].join("\n");
+
 const TIDY_CANVAS_DESCRIPTION = [
-  "Re-pack every frame into clean rows, largest first, so nothing overlaps.",
-  "Use it when frames are sitting on top of each other — usually because they were placed by",
-  "hand with x/y, or resized after placement. It moves frames only; html, comments and pins are",
-  "untouched. Positions are not recoverable afterwards, so do not run it on a canvas whose",
-  "layout the human arranged deliberately without asking them first.",
+  "Re-pack frames into clean rows, largest first, so nothing overlaps.",
+  "By default affects the whole canvas (use with care — other agents' frames will move too).",
+  "Pass frameIds to scope it to only those frames, or yMin+yMax to scope to a vertical band.",
+  "Frames outside the scope stay put and count as obstacles, so other people's work is not shoved aside.",
+  "It moves frames only; html, comments and pins are untouched.",
+  "Positions are not recoverable afterwards, so do not run on a canvas whose layout the human",
+  "arranged deliberately without asking them first.",
 ].join("\n");
 
 const DELETE_FRAME_DESCRIPTION = [
   "Remove a frame from the canvas along with every comment on it. Irreversible.",
+  "Refuses if the frame has any unresolved human comments (top-level); resolve them first, or",
+  "move the frame instead of deleting+recreating it.",
 ].join("\n");
 
 function textResult(text: string): CallToolResult {
@@ -170,7 +197,10 @@ function structuredResult(text: string, structuredContent: Record<string, unknow
   return { content: [{ type: "text", text }], structuredContent };
 }
 
-function describeComment(comment: Comment, frame: FrameSummary | undefined): string {
+function describeComment(
+  comment: Comment,
+  frame: Pick<FrameSummary, "name" | "width" | "height" | "version"> | undefined,
+): string {
   const thread = comment.parentId === null ? "" : ` (reply to ${comment.parentId})`;
   const where =
     frame === undefined
@@ -208,7 +238,9 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
         "tracepaper is a shared canvas between you and a human.",
         "push_html draws a frame; the human opens canvasUrl in a browser, pins comments onto the",
         "frames, and you read those comments back with get_comments (poll it with the returned",
-        "cursor). reply_to_comment and resolve_comment close the loop.",
+        "cursor). If the human pastes a comment id — a line like `comment cmt_… frame frm_…` from",
+        "the canvas copy icon — call get_comment with that id and do not list first.",
+        "reply_to_comment and resolve_comment close the loop.",
       ].join(" "),
     },
   );
@@ -230,7 +262,7 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
         const frame =
           frameId === undefined
             ? store.createFrame({ html, name, width, height, x, y, repo: target, createdBy: defaultRepo })
-            : store.updateFrameHtml(frameId, html, { name, width, height });
+            : store.updateFrameHtml(frameId, html, { name, width, height, x, y });
         bus.emit({
           type: frameId === undefined ? "frame.created" : "frame.updated",
           frame: toFramePayload(frame),
@@ -332,6 +364,47 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
             `Added section "${frame.name}" (${frame.id}) at (${frame.x},${frame.y}), ${frame.width}x${frame.height} on canvas "${frame.repo}".`,
             `It groups whatever frames sit inside it (visually, not by ownership). The human sees it at ${result.canvasUrl}.`,
           ].join("\n") + openCommentsNudge(frame.repo),
+          result,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_comment",
+    {
+      title: "Read one comment",
+      description: GET_COMMENT_DESCRIPTION,
+      inputSchema: getCommentShape,
+      outputSchema: GetCommentResultSchema,
+    },
+    ({ commentId }) => {
+      try {
+        // Not scoped to this connection's canvas: the human pointed at this id on purpose,
+        // including a note on another canvas, and including one already resolved.
+        const comment = store.getComment(commentId);
+        const frame = store.getFrame(comment.frameId);
+        const result: GetCommentResult = {
+          comment,
+          frame: {
+            id: frame.id,
+            name: frame.name,
+            width: frame.width,
+            height: frame.height,
+            version: frame.version,
+            repo: frame.repo,
+          },
+        };
+        return structuredResult(
+          [
+            describeComment(comment, frame),
+            comment.resolved
+              ? "Resolved. reply_to_comment re-opens the thread."
+              : "Reply with reply_to_comment, or resolve_comment once you have acted on it.",
+            `Canvas: ${canvasUrl(frame.repo)}`,
+          ].join("\n"),
           result,
         );
       } catch (error) {
@@ -552,23 +625,47 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
   );
 
   server.registerTool(
+    "move_frame",
+    {
+      title: "Move a frame",
+      description: MOVE_FRAME_DESCRIPTION,
+      inputSchema: moveFrameShape,
+    },
+    ({ frameId, x, y }) => {
+      try {
+        const frame = store.moveFrame(frameId, x, y);
+        bus.emit({ type: "frame.updated", frame: toFramePayload(frame) });
+        return textResult(
+          `Moved frame ${frame.id} "${frame.name}" to (${frame.x}, ${frame.y}) on canvas "${frame.repo}".`,
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "tidy_canvas",
     {
       title: "Re-pack frames so none overlap",
       description: TIDY_CANVAS_DESCRIPTION,
-      inputSchema: {},
+      inputSchema: tidyCanvasShape,
       outputSchema: ListFramesResultSchema,
     },
-    () => {
+    ({ frameIds, yMin, yMax }) => {
       try {
-        const frames = store.tidyFrames(defaultRepo);
+        const frames = store.tidyFrames(defaultRepo, { frameIds, yMin, yMax });
         for (const frame of frames) {
           bus.emit({ type: "frame.updated", frame: toFramePayload({ ...frame, html: "" }) });
         }
+        const scoped =
+          frameIds !== undefined || yMin !== undefined
+            ? " (scoped — frames outside the selection were left in place)"
+            : "";
         const result: ListFramesResult = { frames, canvasUrl: canvasUrl(defaultRepo) };
         return structuredResult(
           [
-            `Re-packed ${frames.length} frame(s); nothing overlaps now.`,
+            `Re-packed ${frames.length} frame(s)${scoped}; nothing in the selection overlaps now.`,
             ...frames.map((f) => `- ${f.id} "${f.name}" ${f.width}x${f.height} @ (${f.x},${f.y})`),
           ].join("\n"),
           result,
@@ -589,6 +686,18 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
     ({ frameId }) => {
       try {
         const frame = store.getFrame(frameId);
+        // Unresolved human threads are the thing delete+recreate was silently destroying.
+        // Agent replies and already-resolved notes do not block — resolve the human thread
+        // first, or move_frame instead of deleting to lay the canvas out.
+        const openHuman = store
+          .listComments({ frameId, author: "human" })
+          .filter((comment) => comment.parentId === null);
+        if (openHuman.length > 0) {
+          throw new Error(
+            `refusing to delete frame ${frame.id} "${frame.name}": ${openHuman.length} unresolved human comment(s). ` +
+              `Resolve them with resolve_comment, or move_frame to reposition without losing the thread.`,
+          );
+        }
         store.deleteFrame(frameId);
         bus.emit({ type: "frame.deleted", frame: toFramePayload(frame) });
         return textResult(`Deleted frame ${frame.id} "${frame.name}" and its comments.`);

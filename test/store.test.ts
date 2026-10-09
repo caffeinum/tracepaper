@@ -810,6 +810,34 @@ describe("frames never overlap", () => {
     expect(s.counts().frames).toBe(8);
     s.close();
   });
+
+  test("tidyFrames can be scoped to frame ids and leaves the rest as obstacles", () => {
+    const s = store();
+    const stay = s.createFrame({ html: "<p>stay</p>", name: "stay", x: 0, y: 0, width: 400, height: 300 });
+    const move = s.createFrame({ html: "<p>move</p>", name: "move", x: 10, y: 10, width: 400, height: 300 });
+    expect(overlapping(s).length).toBeGreaterThan(0);
+
+    s.tidyFrames("default", { frameIds: [move.id] });
+    expect(s.getFrame(stay.id).x).toBe(0);
+    expect(s.getFrame(stay.id).y).toBe(0);
+    const moved = s.getFrame(move.id);
+    expect(moved.x === 10 && moved.y === 10).toBe(false);
+    expect(overlapping(s)).toEqual([]);
+    s.close();
+  });
+
+  test("updateFrameHtml repositions when x/y are passed and leaves them alone when omitted", () => {
+    const s = store();
+    const frame = s.createFrame({ html: "<p>v1</p>", name: "Placed", x: 40, y: 80 });
+    const kept = s.updateFrameHtml(frame.id, "<p>v2</p>", { name: "Still" });
+    expect(kept.x).toBe(40);
+    expect(kept.y).toBe(80);
+    const shifted = s.updateFrameHtml(frame.id, "<p>v3</p>", { x: 0, y: 200 });
+    expect(shifted.x).toBe(0);
+    expect(shifted.y).toBe(200);
+    expect(shifted.version).toBe(3);
+    s.close();
+  });
 });
 
 describe("repo scoping", () => {

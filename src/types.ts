@@ -174,6 +174,16 @@ export const getCommentsShape = {
 export const GetCommentsInputSchema = z.object(getCommentsShape);
 export type GetCommentsInput = z.infer<typeof GetCommentsInputSchema>;
 
+export const getCommentShape = {
+  commentId: z
+    .string()
+    .describe(
+      "The comment id the human copied (cmt_…). A pasted line `comment cmt_… frame frm_…` is this id. Reads that one comment, resolved or not. Do not list first.",
+    ),
+};
+export const GetCommentInputSchema = z.object(getCommentShape);
+export type GetCommentInput = z.infer<typeof GetCommentInputSchema>;
+
 export const listFramesShape = {
   repo: z.string().min(1).optional().describe(`Which repo/canvas to list. Defaults to this connection's repo; pass "*" for every canvas.`),
 };
@@ -207,8 +217,33 @@ export type GetFrameInput = z.infer<typeof GetFrameInputSchema>;
 export const deleteFrameShape = {
   frameId: z.string(),
 };
+
+export const tidyCanvasShape = {
+  frameIds: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      "Only repack these frames. Other frames on the canvas stay where they are and count as obstacles. Omit to repack the whole canvas.",
+    ),
+  yMin: z
+    .number()
+    .optional()
+    .describe("With yMax, only frames whose current y is in [yMin, yMax] are repacked. Pass both or neither."),
+  yMax: z
+    .number()
+    .optional()
+    .describe("See yMin. Frames with y outside this range are left alone."),
+};
 export const DeleteFrameInputSchema = z.object(deleteFrameShape);
 export type DeleteFrameInput = z.infer<typeof DeleteFrameInputSchema>;
+
+export const moveFrameShape = {
+  frameId: z.string().describe("Frame to reposition."),
+  x: z.number().describe("New canvas x position in world px."),
+  y: z.number().describe("New canvas y position in world px."),
+};
+export const MoveFrameInputSchema = z.object(moveFrameShape);
+export type MoveFrameInput = z.infer<typeof MoveFrameInputSchema>;
 
 // ---------- MCP tool results ----------
 
@@ -241,6 +276,19 @@ export const GetCommentsResultSchema = z.object({
   frames: z.array(FrameSummarySchema.pick({ id: true, name: true, width: true, height: true, version: true })),
 });
 export type GetCommentsResult = z.infer<typeof GetCommentsResultSchema>;
+
+export const GetCommentResultSchema = z.object({
+  comment: CommentSchema,
+  frame: FrameSummarySchema.pick({
+    id: true,
+    name: true,
+    width: true,
+    height: true,
+    version: true,
+    repo: true,
+  }),
+});
+export type GetCommentResult = z.infer<typeof GetCommentResultSchema>;
 
 export const ListFramesResultSchema = z.object({
   frames: z.array(FrameSummarySchema),

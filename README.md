@@ -304,13 +304,15 @@ Read the warnings in the panel — they are real:
 | tool | what it does |
 | --- | --- |
 | `push_html` | `{html, name?, frameId?, width?, height?, x?, y?}` — draws a frame. No `frameId` creates one, auto-placed beside the last and wrapping onto a new row so the canvas stays readable; pass `x`/`y` (world px) to place it yourself and group related work; with `frameId` it replaces that frame's HTML in place and bumps `version`, resizing it too if you pass `width`/`height`. An unknown `frameId` is an error, never a silent create. Returns `{frameId, name, version, url, canvasUrl}`. |
-| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first, resolved excluded by default. Returns `{comments, cursor, frames}`; pass `cursor` back as `since` to poll for only what is new. Poll with `author: "human"` or your own replies come back looking like fresh feedback. `since` accepts an ISO timestamp too, but that matches only comments *created* after it — one the human edited or re-opened never comes back, and two written in the same millisecond cannot be separated. Prefer the cursor. |
+| `get_comments` | `{frameId?, since?, includeResolved?, author?}` — reads the human's feedback oldest-first, resolved excluded by default. Returns `{comments, cursor, frames}`; pass `cursor` back as `since` to poll for only what is new. Poll with `author: "human"` or your own replies come back looking like fresh feedback. `since` accepts an ISO timestamp too, but that matches only comments *created* after it — one the human edited or re-opened never comes back, and two written in the same millisecond cannot be separated. Prefer the cursor. If the human pasted a comment id, use `get_comment` instead of listing. |
+| `get_comment` | `{commentId}` — reads that one comment, resolved or not, plus the frame it sits on. The canvas copy icon puts `comment cmt_… frame frm_…` on the clipboard; pass the `cmt_` id. Do not list first. |
 | `get_frame` | `{frameId}` → the frame's current HTML, name, size and version. Call it before `push_html` on a frame you did not author this session: `push_html` replaces the whole document, so pushing blind discards whatever is there. |
 | `list_frames` | `{}` → every frame with size, position, version, `commentCount`, `unresolvedCount` (no HTML), plus `canvasUrl`. |
+| `move_frame` | `{frameId, x, y}` — moves a frame. HTML and comments stay. This is the safe reposition; delete + recreate drops the thread. |
 | `reply_to_comment` | `{commentId, text}` — posts a threaded reply as `"agent"`; it appears live in the human's open thread. |
 | `resolve_comment` | `{commentId, note?}` — closes the thread so it drops out of `get_comments`; `note` is also posted as an agent reply. Replies are resolved with their root, so your own note does not come back as fresh feedback on the next poll. |
-| `tidy_canvas` | `{}` — re-packs every frame into clean rows, largest first, so nothing overlaps. Moves frames only; html, comments and pins are untouched. |
-| `delete_frame` | `{frameId}` — removes a frame and its comments. |
+| `tidy_canvas` | `{frameIds?, yMin?, yMax?}` — re-packs frames into clean rows, largest first. No args repacks the whole canvas. `frameIds`, or `yMin`+`yMax` together, repacks only that scope; other frames stay put as obstacles. Moves frames only; html, comments and pins are untouched. |
+| `delete_frame` | `{frameId}` — removes a frame and its comments. Refuses while any unresolved human thread is still on it; resolve those, or `move_frame` to reposition. The canvas delete button is not guarded. |
 
 ## The loop
 
@@ -360,7 +362,9 @@ update. Each comment records the `frameVersion` it was left on.
   selection to the viewport; `⌘1` fits everything.
 - Drag a frame's **title** to move it. The title is the handle, so dragging never fights with
   clicking into the page itself. The move is written once on release.
-- Click a pin to open its thread — reply, resolve, or delete there.
+- Click a pin to open its thread — reply, resolve, or delete there. The copy icon on a note
+  (and in the comment list) copies `comment cmt_… frame frm_…`. Paste that to an agent; it
+  reads that one note with `get_comment` and does not have to list the canvas.
 - Frames land in rows, wrapping about three wide, rather than marching off to the right forever.
   Placement checks every existing frame, so a new frame never lands on one — including after a
   resize or an explicit `x`/`y`. `tidy_canvas` re-packs a canvas that is already tangled.

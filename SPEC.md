@@ -124,6 +124,11 @@ version so a coordinate is usable and staleness is visible without a second call
 An ISO timestamp is also accepted, but it compares `createdAt` only: a comment the
 human later edited or re-opened never comes back through it. Prefer the cursor.
 
+### `get_comment`
+`{ commentId: string }` — reads that one comment, even if it is resolved, plus the frame
+it sits on. The canvas copy icon copies `comment cmt_… frame frm_…`; pass the `cmt_` id.
+Do not list first. A human pointing at a note is not a poll.
+
 ### `list_frames`
 `{}` → `{ frames: Array<Frame minus html, plus commentCount, unresolvedCount> , canvasUrl }`
 
@@ -141,7 +146,13 @@ replaces a frame's whole document, so an agent that did not author the current h
 this session must read it back first or it silently discards the design.
 
 ### `delete_frame`
-`{ frameId: string }` — removes a frame and its comments.
+`{ frameId: string }` — removes a frame and its comments. Refuses while any unresolved
+top-level human comment is still on it (resolve them, or `move_frame`). The canvas
+delete button is not guarded — this refusal is the agent tool only.
+
+### `move_frame`
+`{ frameId: string, x: number, y: number }` — moves a frame. HTML and comments stay.
+The safe reposition; delete + recreate drops the thread.
 
 ## HTTP API
 

@@ -434,13 +434,28 @@ code {
 
 .entry {
   display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 4px 4px 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-m);
+  background: none;
+  color: inherit;
+}
+
+.entry-open {
+  display: grid;
   grid-template-columns: 22px 1fr;
   gap: 9px;
   width: 100%;
+  min-width: 0;
   text-align: left;
-  padding: 8px 8px 9px;
-  border: 1px solid transparent;
-  border-radius: var(--r-m);
+  padding: 4px 4px 5px 8px;
+  border: 0;
+  border-radius: var(--r-s);
   background: none;
   color: inherit;
   font: inherit;
@@ -848,6 +863,13 @@ code {
   pointer-events: auto;
 }
 
+.frame.is-interactive iframe {
+  /* Above the catcher (z 3) and pins container so the page actually receives the click.
+     The catcher used to stay on top until onload, which is why the banner showed and the page never did. */
+  z-index: 6;
+  pointer-events: auto;
+}
+
 .frame.is-interactive .frame-catch {
   pointer-events: none;
 }
@@ -1075,6 +1097,38 @@ code {
   margin-bottom: 3px;
   font-size: 10.5px;
   color: var(--ink-3);
+}
+
+.copy-id {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  flex: none;
+}
+
+.copy-id:hover,
+.copy-id:focus-visible {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.copy-id.is-copied {
+  color: var(--done);
+}
+
+.copy-id svg {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 
 .msg-who {
