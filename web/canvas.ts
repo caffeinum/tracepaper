@@ -1728,9 +1728,27 @@ function endPan(event: PointerEvent): void {
 stage.addEventListener("pointerup", endPan);
 stage.addEventListener("pointercancel", endPan);
 
+/** True when the pointer is over the page of the frame you're reading, not its title or the leave-hint. */
+function overInteractivePage(event: { clientX: number; clientY: number }): boolean {
+  if (interactiveFrameId === null) return false;
+  const node = frameNodes.get(interactiveFrameId);
+  if (!node || node.kind !== "html") return false;
+  const rect = node.body.getBoundingClientRect();
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  );
+}
+
 viewport.addEventListener(
   "wheel",
   (event) => {
+    // Pinch still zooms the canvas. A plain scroll over the page you're reading belongs to that
+    // page: preventDefault here cancels the iframe's own scroll (including an inner scroller),
+    // which is why the canvas moved and the page only shifted a hair.
+    if (overInteractivePage(event) && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     // A trackpad pinch arrives as a wheel event with ctrlKey set.
     if (event.ctrlKey || event.metaKey) {

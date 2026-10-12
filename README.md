@@ -372,7 +372,8 @@ update. Each comment records the `frameVersion` it was left on.
   browser's policy for sandboxed frames, which is the behaviour you want — a canvas full of
   frames cannot start making noise on its own.
 - Double-click a frame to interact with the page inside it; entering also fits it to the
-  viewport, since that is what you want when you step in to use it. `esc` leaves — including
+  viewport, since that is what you want when you step in to use it. Scroll then scrolls the
+  page inside the frame, not the canvas (a pinch still zooms the canvas). `esc` leaves — including
   while your cursor is in a field inside the frame, which needs a small script served with each
   frame, because a cross-origin sandbox otherwise swallows the keypress. Clicking the canvas or
   the pill under the frame also leaves.
