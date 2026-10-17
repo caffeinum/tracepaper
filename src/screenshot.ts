@@ -9,7 +9,10 @@ import { join } from "node:path";
  */
 
 const CLAMP_MIN = 1;
-const CLAMP_MAX = 4000;
+// Chrome's screenshot surface tops out near 16384 device px. We render at 2×, so the CSS
+// window cannot exceed 8192 or the shot tiles / gets clipped. Frames taller than this are
+// still clamped; the canvas must not stretch that shot to the frame (object-fit: contain).
+const CLAMP_MAX = 8192;
 /**
  * A frame document at /f/:id is static (no SSE), so `--screenshot` terminates; this only guards a
  * hang. Generous because a *cold* first Chrome launch (fresh profile, loaded/CI machine) can take

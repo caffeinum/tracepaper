@@ -864,7 +864,8 @@ function renderFrames(): void {
       node.desiredSrc = `/f/${frame.id}?v=${frame.version}`;
       // The thumbnail is content-addressed by version, so a new version fetches a fresh PNG (and the
       // browser caches each version immutably). loading="lazy" defers off-screen fetches.
-      node.thumb.src = `/f/${frame.id}.png?v=${frame.version}`;
+      // shot=2 busts the immutable cache of thumbs rendered under the 4000px height clamp.
+      node.thumb.src = `/f/${frame.id}.png?v=${frame.version}&shot=2`;
       // Refresh the live iframe only if it's currently the dominant frame; otherwise it stays on the
       // thumbnail and goes live (at the new version) when zoomed into.
       if (node.loaded) node.iframe.src = node.desiredSrc;
@@ -1777,6 +1778,18 @@ window.addEventListener(
   { passive: false, capture: true },
 );
 
+// Safari pinch is a gesture, not a wheel. preventDefault is the only thing that stops it
+// zooming the browser page. Chrome's pinch is ctrl+wheel, caught above.
+for (const type of ["gesturestart", "gesturechange"] as const) {
+  window.addEventListener(
+    type,
+    (event) => {
+      event.preventDefault();
+    },
+    { passive: false },
+  );
+}
+
 function pointerInsideFrame(frameId: string, event: { clientX: number; clientY: number }): boolean {
   const node = frameNodes.get(frameId);
   if (!node) return false;
@@ -2144,7 +2157,7 @@ function listenForFrameEscape(): void {
     const data = event.data;
     if (!isRecord(data)) return;
     const kind = data["__tracepaper"];
-    if (kind !== "escape" && kind !== "scroll") return;
+    if (kind !== "escape" && kind !== "scroll" && kind !== "zoom") return;
 
     // Identity by source window, same as escape: the frame's origin is the opaque string "null",
     // so event.origin is useless; matching event.source against an iframe we created is the only
@@ -2154,6 +2167,14 @@ function listenForFrameEscape(): void {
 
     if (kind === "escape") {
       if (interactiveFrameId === id) setInteractive(null);
+      return;
+    }
+
+    if (kind === "zoom") {
+      const key = data["key"];
+      if (key === "0") resetZoom();
+      else if (key === "-" || key === "_") zoomAtCenter(0.8);
+      else if (key === "=" || key === "+") zoomAtCenter(1.25);
       return;
     }
 

@@ -601,8 +601,24 @@ const ESCAPE_BRIDGE = `<script>
 (function(){
   if (window.parent === window) return;
   addEventListener("keydown", function (e) {
-    if (e.key === "Escape") parent.postMessage({ __tracepaper: "escape" }, "*");
+    if (e.key === "Escape") {
+      parent.postMessage({ __tracepaper: "escape" }, "*");
+      return;
+    }
+    // Focus is in this frame, so the canvas never sees the key — and the browser would
+    // zoom the page. Swallow it and hand the shortcut back to the canvas.
+    if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+" || e.key === "-" || e.key === "_" || e.key === "0")) {
+      e.preventDefault();
+      parent.postMessage({ __tracepaper: "zoom", key: e.key }, "*");
+    }
   }, true);
+  // A trackpad pinch over the frame is ctrl+wheel / a Safari gesture. Both zoom the
+  // browser page, not the canvas. The page inside keeps plain scroll.
+  addEventListener("wheel", function (e) {
+    if (e.ctrlKey || e.metaKey) e.preventDefault();
+  }, { capture: true, passive: false });
+  addEventListener("gesturestart", function (e) { e.preventDefault(); }, { capture: true, passive: false });
+  addEventListener("gesturechange", function (e) { e.preventDefault(); }, { capture: true, passive: false });
   var queued = false;
   function report(){
     queued = false;
