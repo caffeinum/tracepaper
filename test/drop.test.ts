@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeShare, publishFrame, scriptNameFor, shareExpiry, solvePreviewChallenge } from "../src/drop.ts";
+import { describeShare, publishFrame, scriptNameFor, shareExpiry, solvePreviewChallenge, type DropFetch } from "../src/drop.ts";
 import { newFrameId } from "../src/ids.ts";
 import { shareText } from "../src/share.ts";
 import { Store } from "../src/store.ts";
@@ -85,7 +85,7 @@ describe("frame shares", () => {
 describe("publishFrame", () => {
   test("the live url comes from the temporary account, not a guessed host", async () => {
     const calls: string[] = [];
-    const fetchImpl: typeof fetch = async (input, init) => {
+    const fetchImpl: DropFetch = async (input, init) => {
       const url = String(input);
       calls.push(`${init?.method ?? "GET"} ${url}`);
       const json = (body: unknown, status = 200) =>
