@@ -1837,10 +1837,9 @@ viewport.addEventListener(
   { passive: false },
 );
 
-// A trackpad pinch (ctrl+wheel) must zoom the CANVAS, never the browser page — even when the
-// pointer is over the toolbar, the chip, or the sidebar rather than the viewport. Caught at the
-// window in the capture phase so it beats every other handler and the page can never zoom out from
-// under the canvas (which blows up the grid and constant-size labels and pushes the toolbar off).
+// A trackpad pinch must zoom the BOARD, never the browser page. Chrome sends ctrl+wheel.
+// Safari sends gesture events. preventDefault stops the chrome (toolbar, chips) from scaling;
+// zoomAt moves the map, the way a maps app does.
 window.addEventListener(
   "wheel",
   (event) => {
@@ -1852,17 +1851,29 @@ window.addEventListener(
   { passive: false, capture: true },
 );
 
-// Safari pinch is a gesture, not a wheel. preventDefault is the only thing that stops it
-// zooming the browser page. Chrome's pinch is ctrl+wheel, caught above.
-for (const type of ["gesturestart", "gesturechange"] as const) {
-  window.addEventListener(
-    type,
-    (event) => {
-      event.preventDefault();
-    },
-    { passive: false },
-  );
-}
+let safariPinch = 1;
+window.addEventListener(
+  "gesturestart",
+  (event) => {
+    event.preventDefault();
+    safariPinch = 1;
+  },
+  { passive: false },
+);
+window.addEventListener(
+  "gesturechange",
+  (event) => {
+    event.preventDefault();
+    const scale = (event as Event & { scale?: number }).scale;
+    if (typeof scale !== "number" || !(scale > 0) || !(safariPinch > 0)) return;
+    const point = event as Event & { clientX?: number; clientY?: number };
+    if (typeof point.clientX !== "number" || typeof point.clientY !== "number") return;
+    zoomAt(stagePoint({ clientX: point.clientX, clientY: point.clientY }), scale / safariPinch);
+    safariPinch = scale;
+  },
+  { passive: false },
+);
+window.addEventListener("gestureend", (event) => event.preventDefault(), { passive: false });
 
 function pointerInsideFrame(frameId: string, event: { clientX: number; clientY: number }): boolean {
   const node = frameNodes.get(frameId);
@@ -2255,6 +2266,12 @@ function listenForFrameEscape(): void {
       if (key === "0") resetZoom();
       else if (key === "-" || key === "_") zoomAtCenter(0.8);
       else if (key === "=" || key === "+") zoomAtCenter(1.25);
+      else if (typeof data["delta"] === "number" && Number.isFinite(data["delta"])) {
+        zoomAtCenter(clamp(Math.exp(-data["delta"] * 0.01), 0.5, 2));
+      } else if (typeof data["scale"] === "number" && data["scale"] > 0) {
+        const previous = typeof data["previous"] === "number" && data["previous"] > 0 ? data["previous"] : 1;
+        zoomAtCenter(data["scale"] / previous);
+      }
       return;
     }
 

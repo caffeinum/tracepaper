@@ -8,9 +8,8 @@
     <link rel="icon" href="/icon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <script>
-      // Browser page zoom blows up the chrome. Block it as early as possible, in the capture
-      // phase, before the canvas bundle loads. Canvas zoom (the toolbar, pinch-as-pan-zoom of
-      // the board) still runs: this only calls preventDefault, it does not stop the event.
+      // Browser page zoom scales the chrome. Block that. Pinch and ⌘+/- still zoom the board;
+      // those listeners run after this one and are not stopped.
       (function () {
         function zoomKey(e) {
           if (!(e.ctrlKey || e.metaKey)) return false;

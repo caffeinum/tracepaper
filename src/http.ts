@@ -656,13 +656,23 @@ const ESCAPE_BRIDGE = `<script>
       parent.postMessage({ __tracepaper: "zoom", key: e.key }, "*");
     }
   }, true);
-  // A trackpad pinch over the frame is ctrl+wheel / a Safari gesture. Both zoom the
-  // browser page, not the canvas. The page inside keeps plain scroll.
+  // A pinch over the frame would zoom the browser chrome. Swallow it and zoom the board instead.
+  // Plain scroll still belongs to the page.
+  var pinch = 1;
   addEventListener("wheel", function (e) {
-    if (e.ctrlKey || e.metaKey) e.preventDefault();
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    parent.postMessage({ __tracepaper: "zoom", delta: e.deltaY }, "*");
   }, { capture: true, passive: false });
-  addEventListener("gesturestart", function (e) { e.preventDefault(); }, { capture: true, passive: false });
-  addEventListener("gesturechange", function (e) { e.preventDefault(); }, { capture: true, passive: false });
+  addEventListener("gesturestart", function (e) {
+    e.preventDefault();
+    pinch = 1;
+  }, { capture: true, passive: false });
+  addEventListener("gesturechange", function (e) {
+    e.preventDefault();
+    parent.postMessage({ __tracepaper: "zoom", scale: e.scale, previous: pinch }, "*");
+    pinch = e.scale;
+  }, { capture: true, passive: false });
   var queued = false;
   function report(){
     queued = false;
