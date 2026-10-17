@@ -19,6 +19,10 @@ export function newCommentId(): string {
   return `cmt_${hex12()}`;
 }
 
+export function newShareId(): string {
+  return `shr_${hex12()}`;
+}
+
 export function isCommentId(value: string): boolean {
   return COMMENT_ID_RE.test(value);
 }

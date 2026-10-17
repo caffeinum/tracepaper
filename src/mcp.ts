@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toFramePayload, type Bus } from "./events.ts";
+import { shareFrame, shareText } from "./share.ts";
 import type { Store } from "./store.ts";
 import {
   AddSectionResultSchema,
@@ -23,6 +24,7 @@ import {
   pushHtmlShape,
   replyToCommentShape,
   resolveCommentShape,
+  shareFrameShape,
   tidyCanvasShape,
   type AddSectionResult,
   type AddTextResult,
@@ -240,6 +242,8 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
         "frames, and you read those comments back with get_comments (poll it with the returned",
         "cursor). If the human pastes a comment id — a line like `comment cmt_… frame frm_…` from",
         "the canvas copy icon — call get_comment with that id and do not list first.",
+        "share_frame publishes one frame's HTML as a Cloudflare Drop page and returns the live url,",
+        "the claim url, and when that preview expires. Give the claim url only to the human.",
         "reply_to_comment and resolve_comment close the loop.",
       ].join(" "),
     },
@@ -618,6 +622,32 @@ export function createMcpServer({ store, bus, baseUrl, defaultRepo }: McpServerD
           ].join("\n"),
           result,
         );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+const SHARE_FRAME_DESCRIPTION = [
+  "Publish one frame's current HTML as a public static page via Cloudflare Drop. No Cloudflare account.",
+  "Returns the live url, a claim url, when the snapshot was published, and when the preview expires.",
+  "The preview is deleted at expiresAt unless the human opens the claim url and finishes claiming it.",
+  "The claim url can take the temporary account — give it only to the human, not to a public channel.",
+  "Sharing again before expiry updates the same url and does not extend the expiry.",
+  "This snapshots the HTML. It does not publish the canvas, comments, or the live server.",
+].join("\n");
+
+  server.registerTool(
+    "share_frame",
+    {
+      title: "Publish a frame",
+      description: SHARE_FRAME_DESCRIPTION,
+      inputSchema: shareFrameShape,
+    },
+    async ({ frameId }) => {
+      try {
+        const share = await shareFrame(store, frameId);
+        return textResult(shareText(share));
       } catch (error) {
         return errorResult(error);
       }

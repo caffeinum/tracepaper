@@ -51,6 +51,16 @@ type CanvasComment = {
   createdAt: string;
 };
 
+type FrameShare = {
+  id: string;
+  frameId: string;
+  frameVersion: number;
+  url: string;
+  claimUrl: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -119,6 +129,27 @@ function toFrame(raw: unknown): CanvasFrame {
 function toRepo(raw: unknown): RepoInfo {
   if (!isRecord(raw)) throw new Error(`repo must be an object, got ${preview(raw)}`);
   return { repo: str(raw, "repo", "repo"), frameCount: num(raw, "frameCount", "repo") };
+}
+
+function toShare(raw: unknown): FrameShare {
+  if (!isRecord(raw)) throw new Error(`share must be an object, got ${preview(raw)}`);
+  return {
+    id: str(raw, "id", "share"),
+    frameId: str(raw, "frameId", "share"),
+    frameVersion: num(raw, "frameVersion", "share"),
+    url: str(raw, "url", "share"),
+    claimUrl: str(raw, "claimUrl", "share"),
+    createdAt: str(raw, "createdAt", "share"),
+    expiresAt: str(raw, "expiresAt", "share"),
+  };
+}
+
+function shareLabel(share: FrameShare): string {
+  const expires = Date.parse(share.expiresAt);
+  if (Number.isNaN(expires)) throw new Error(`share.expiresAt is not a date: ${share.expiresAt}`);
+  if (expires <= Date.now()) return "published link expired";
+  const mins = Math.max(1, Math.ceil((expires - Date.now()) / 60_000));
+  return `live · ${mins}m`;
 }
 
 function toComment(raw: unknown): CanvasComment {
@@ -237,6 +268,7 @@ const repoSwitcher = el<HTMLSelectElement>("repo-switcher");
 const frames = new Map<string, CanvasFrame>();
 const frameOrder: string[] = [];
 const comments = new Map<string, CanvasComment>();
+const shares = new Map<string, FrameShare>();
 
 /**
  * Where each frame's content is scrolled, in content px, as reported by the frame's bridge
@@ -600,6 +632,8 @@ type HtmlFrameNode = SketchParts & {
   dims: HTMLSpanElement;
   by: HTMLSpanElement;
   save: HTMLAnchorElement;
+  drop: HTMLSpanElement;
+  publish: HTMLButtonElement;
   body: HTMLDivElement;
   iframe: HTMLIFrameElement;
   /** A lightweight PNG of the frame (`/f/:id.png?v=…`), shown by default so a big board never loads
@@ -672,6 +706,32 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   kill.addEventListener("click", () => requestDeleteFrame(frame.id));
   label.append(name, dims, by, save, kill);
 
+  const drop = document.createElement("span");
+  drop.className = "frame-drop";
+  drop.hidden = true;
+  const publish = document.createElement("button");
+  publish.type = "button";
+  publish.className = "frame-publish";
+  publish.textContent = "Publish";
+  publish.title = "Publish this frame on Cloudflare Drop. The link expires; the time is saved.";
+  publish.addEventListener("click", (event) => {
+    event.stopPropagation();
+    publish.disabled = true;
+    publish.textContent = "Publishing…";
+    postJson(`/api/frames/${frame.id}/share`, {})
+      .then((payload) => {
+        const share = toShare(payload);
+        shares.set(share.frameId, share);
+        renderFrames();
+      })
+      .catch(fail)
+      .finally(() => {
+        publish.disabled = false;
+        publish.textContent = "Publish";
+      });
+  });
+  label.append(drop, publish);
+
   const body = document.createElement("div");
   body.className = "frame-body";
 
@@ -723,7 +783,7 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
     const target = event.target;
     if (
       target instanceof Element &&
-      target.closest(".pin, .frame-hint, .frame-kill, .frame-save") !== null
+      target.closest(".pin, .frame-hint, .frame-kill, .frame-save, .frame-publish, .frame-drop") !== null
     ) {
       return;
     }
@@ -757,7 +817,7 @@ function buildHtmlFrame(frame: CanvasFrame): HtmlFrameNode {
   // later in the DOM so it paints over the thumb during the brief overlap while it loads.
   body.append(parts.sketchFill, thumb, iframe, parts.sketch, catcher, pins);
   root.append(label, body, hint);
-  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, save, body, iframe, thumb, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
+  const node: HtmlFrameNode = { kind: "html", root, name, dims, by, save, drop, publish, body, iframe, thumb, pins, version: -1, desiredSrc: "", loaded: false, ...parts };
   // Clip both the iframe and the thumb to the wobbly outline so straight edges never poke past it.
   const p1 = paintSketch(node, frame.width, frame.height);
   node.iframe.style.clipPath = `path('${p1}')`;
@@ -858,6 +918,20 @@ function renderFrames(): void {
     const showBy = frame.createdBy !== null && frame.createdBy !== currentRepo;
     node.by.textContent = showBy ? (frame.createdBy ?? "") : "";
     node.by.hidden = !showBy;
+    const share = shares.get(frame.id);
+    if (share === undefined) {
+      node.drop.hidden = true;
+      node.drop.replaceChildren();
+    } else {
+      node.drop.hidden = false;
+      const link = document.createElement("a");
+      link.href = share.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = shareLabel(share);
+      link.title = `published ${share.createdAt}\nexpires ${share.expiresAt}${share.claimUrl === "" ? "" : `\nclaim: ${share.claimUrl}`}`;
+      node.drop.replaceChildren(link);
+    }
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
     if (node.version !== frame.version) {
       node.version = frame.version;
@@ -2098,10 +2172,11 @@ async function loadAll(): Promise<void> {
   // now-abandoned canvas must not clobber the current one.
   const scopeAtStart = currentRepo;
   const scope = `&repo=${encodeURIComponent(scopeAtStart)}`;
-  const [framePayload, commentPayload, repoPayload] = await Promise.all([
+  const [framePayload, commentPayload, repoPayload, sharePayload] = await Promise.all([
     api(`/api/frames?repo=${encodeURIComponent(scopeAtStart)}`),
     api(`/api/comments?includeResolved=true${scope}`),
     api("/api/repos"),
+    api(`/api/shares?repo=${encodeURIComponent(scopeAtStart)}`),
   ]);
   // The canvas was switched while this fetch was in flight; its data is for the old scope. Drop it —
   // the switch issued its own loadAll for the new scope.
@@ -2109,10 +2184,15 @@ async function loadAll(): Promise<void> {
   frames.clear();
   frameOrder.length = 0;
   comments.clear();
+  shares.clear();
   for (const raw of toList(framePayload, "frames")) putFrame(toFrame(raw));
   for (const raw of toList(commentPayload, "comments")) {
     const comment = toComment(raw);
     comments.set(comment.id, comment);
+  }
+  for (const raw of toList(sharePayload, "shares")) {
+    const share = toShare(raw);
+    shares.set(share.frameId, share);
   }
   renderRepoSwitcher(toList(repoPayload, "repos").map(toRepo));
   renderAll();

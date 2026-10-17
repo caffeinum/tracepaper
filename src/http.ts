@@ -6,6 +6,7 @@ import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
 import { SERVER_VERSION } from "./mcp.ts";
 import { createMcpHttpHandler, type McpHttpHandler } from "./mcp-http.ts";
 import { findChrome, renderCached, renderPng } from "./screenshot.ts";
+import { shareFrame } from "./share.ts";
 import type { Store } from "./store.ts";
 import type { Tunnel } from "./tunnel.ts";
 import {
@@ -241,6 +242,20 @@ async function route(ctx: Context): Promise<Response> {
       return methodNotAllowed(method, path);
     }
 
+    const frameShare = /^\/api\/frames\/([^/]+)\/share$/.exec(path);
+    if (frameShare !== null) {
+      const id = frameShare[1];
+      if (id === undefined) return fail(400, `bad path: ${path}`);
+      if (method === "GET") return json({ shares: ctx.store.listFrameShares().filter((share) => share.frameId === id) });
+      if (method === "POST") return await handlePublishFrame(ctx, id);
+      return methodNotAllowed(method, path);
+    }
+
+    if (path === "/api/shares" && method === "GET") {
+      const repo = url.searchParams.get("repo");
+      return json({ shares: ctx.store.listFrameShares(repo === null || repo === "" ? undefined : repo) });
+    }
+
     const frameId = matchPrefix(path, "/api/frames/");
     if (frameId !== null) {
       if (method === "GET") return handleGetFrame(ctx, frameId);
@@ -327,6 +342,11 @@ function handleListFrames(ctx: Context, url: URL): Response {
   // ?repo= scopes to one canvas; omitted returns every frame, so the web still shows all for now.
   const repo = url.searchParams.get("repo");
   return json({ frames: ctx.store.listFrames(repo === null ? undefined : repo) });
+}
+
+async function handlePublishFrame(ctx: Context, id: string): Promise<Response> {
+  const share = await shareFrame(ctx.store, id);
+  return json(share, 201);
 }
 
 function handleGetFrame(ctx: Context, id: string): Response {

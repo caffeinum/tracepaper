@@ -41,6 +41,7 @@ const TOOL_NAMES = [
   "push_html",
   "reply_to_comment",
   "resolve_comment",
+  "share_frame",
   "tidy_canvas",
 ];
 const EXIT_TIMEOUT_MS = 5000;

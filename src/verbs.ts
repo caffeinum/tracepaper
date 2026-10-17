@@ -12,5 +12,6 @@ export const CLI_VERBS = new Set([
   "get",
   "tidy",
   "delete",
+  "share",
   "help",
 ]);

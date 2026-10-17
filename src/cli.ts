@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { resolveRepo } from "./repo.ts";
+import { shareFrame, shareText } from "./share.ts";
 import { Store } from "./store.ts";
 import type { Comment } from "./types.ts";
 import { CLI_VERBS } from "./verbs.ts";
@@ -255,6 +256,14 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
         return 0;
       }
 
+      case "share": {
+        const frameId = flags._[0];
+        if (frameId === undefined) throw new Error("usage: tracepaper share <frameId>");
+        const share = await shareFrame(store, frameId);
+        out(json ? JSON.stringify(share, null, 2) : shareText(share));
+        return 0;
+      }
+
       case "tidy": {
         const frames = store.tidyFrames(repoFlag(flags));
         out(json ? JSON.stringify({ frames }, null, 2) : `re-packed ${frames.length} frame(s).`);
@@ -307,6 +316,8 @@ function printHelp(): void {
       "  tracepaper resolve <id>          resolve a thread (--note <text> to reply and resolve)",
       "  tracepaper tidy                  re-pack frames so none overlap",
       "  tracepaper delete <frameId>      remove a frame and its comments",
+      "  tracepaper share <frameId>       publish the frame's HTML on Cloudflare Drop (no account).",
+      "                                   prints the live url, the claim url, created time, and expiry",
       "",
       "Add --json to any read/write for machine-readable output.",
       "A frame is saved even with no server running; `serve` is only needed to view the canvas.",

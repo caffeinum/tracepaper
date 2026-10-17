@@ -94,7 +94,7 @@ curl -fsS "$BASE/api/health" >/dev/null || fail "http server never came up (see 
 
 step "tools — the agent surface is advertised to an outside client"
 TOOLS="$(TRACEPAPER_PORT=0 mcpt tools --format json bun run "$ROOT/src/index.ts")"
-for tool in push_html get_comment get_comments get_frame list_frames move_frame resolve_comment reply_to_comment tidy_canvas delete_frame; do
+for tool in push_html get_comment get_comments get_frame list_frames move_frame resolve_comment reply_to_comment share_frame tidy_canvas delete_frame; do
   want "\"$tool\"" "$TOOLS" "tool $tool missing from mcpt tools"
 done
 

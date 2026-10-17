@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Database } from "bun:sqlite";
-import { isCommentId, newCommentId, newFrameId } from "./ids.ts";
+import { isCommentId, newCommentId, newFrameId, newShareId } from "./ids.ts";
 import {
   CommentSchema,
   CreateCommentInputSchema,
@@ -83,6 +83,25 @@ CREATE TABLE IF NOT EXISTS counters (
   value INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS drop_accounts (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL,
+  apiToken  TEXT NOT NULL,
+  claimUrl  TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  expiresAt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS frame_shares (
+  id           TEXT PRIMARY KEY,
+  frameId      TEXT    NOT NULL REFERENCES frames(id) ON DELETE CASCADE,
+  frameVersion INTEGER NOT NULL,
+  url          TEXT    NOT NULL,
+  accountId    TEXT    NOT NULL,
+  createdAt    TEXT    NOT NULL,
+  expiresAt    TEXT    NOT NULL
+);
+
 `;
 
 // Indexes are created after migrate(): CREATE TABLE IF NOT EXISTS is a no-op on a db written by
@@ -114,6 +133,16 @@ type FrameRow = {
 type FrameSummaryRow = Omit<FrameRow, "html"> & {
   commentCount: number;
   unresolvedCount: number;
+};
+
+export type FrameShareRow = {
+  id: string;
+  frameId: string;
+  frameVersion: number;
+  url: string;
+  claimUrl: string;
+  createdAt: string;
+  expiresAt: string;
 };
 
 type CommentRow = {
@@ -787,5 +816,124 @@ export class Store {
       .query("SELECT COUNT(*) AS n FROM frames WHERE repo = $repo")
       .get({ $repo: repo }) as { n: number };
     return `Frame ${row.n + 1}`;
+  }
+
+  /** The temporary Cloudflare account still inside its claim window, if one is stored. Token stays here. */
+  liveDropAccount(now = new Date().toISOString()): {
+    id: string;
+    name: string;
+    apiToken: string;
+    claimUrl: string;
+    createdAt: string;
+    expiresAt: string;
+  } | null {
+    const row = this.db
+      .query(
+        `SELECT id, name, apiToken, claimUrl, createdAt, expiresAt FROM drop_accounts
+         WHERE apiToken != '' AND expiresAt > ? ORDER BY expiresAt DESC LIMIT 1`,
+      )
+      .get(now) as {
+      id: string;
+      name: string;
+      apiToken: string;
+      claimUrl: string;
+      createdAt: string;
+      expiresAt: string;
+    } | null;
+    return row;
+  }
+
+  saveDropAccount(account: {
+    id: string;
+    name: string;
+    apiToken: string;
+    claimUrl: string;
+    createdAt: string;
+    expiresAt: string;
+  }): void {
+    this.db
+      .query(
+        `INSERT INTO drop_accounts (id, name, apiToken, claimUrl, createdAt, expiresAt)
+         VALUES ($id, $name, $apiToken, $claimUrl, $createdAt, $expiresAt)
+         ON CONFLICT(id) DO UPDATE SET
+           apiToken = excluded.apiToken,
+           claimUrl = excluded.claimUrl,
+           expiresAt = excluded.expiresAt`,
+      )
+      .run({
+        $id: account.id,
+        $name: account.name,
+        $apiToken: account.apiToken,
+        $claimUrl: account.claimUrl,
+        $createdAt: account.createdAt,
+        $expiresAt: account.expiresAt,
+      });
+  }
+
+  /** Drop the bearer secrets once the claim window has passed. The row stays so the expiry is still known. */
+  wipeExpiredDropSecrets(now = new Date().toISOString()): void {
+    this.db.query(`UPDATE drop_accounts SET apiToken = '', claimUrl = '' WHERE expiresAt <= ?`).run(now);
+  }
+
+  saveFrameShare(input: {
+    frameId: string;
+    frameVersion: number;
+    url: string;
+    accountId: string;
+    createdAt: string;
+    expiresAt: string;
+  }): FrameShareRow {
+    if (!this.hasFrame(input.frameId)) throw new Error(`unknown frame: ${input.frameId}`);
+    const id = newShareId();
+    this.db
+      .query(
+        `INSERT INTO frame_shares (id, frameId, frameVersion, url, accountId, createdAt, expiresAt)
+         VALUES ($id, $frameId, $frameVersion, $url, $accountId, $createdAt, $expiresAt)`,
+      )
+      .run({
+        $id: id,
+        $frameId: input.frameId,
+        $frameVersion: input.frameVersion,
+        $url: input.url,
+        $accountId: input.accountId,
+        $createdAt: input.createdAt,
+        $expiresAt: input.expiresAt,
+      });
+    return this.getFrameShare(id);
+  }
+
+  getFrameShare(id: string): FrameShareRow {
+    const row = this.db
+      .query(
+        `SELECT s.id, s.frameId, s.frameVersion, s.url,
+                CASE WHEN s.expiresAt > $now AND a.claimUrl != '' THEN a.claimUrl ELSE '' END AS claimUrl,
+                s.createdAt, s.expiresAt
+         FROM frame_shares s
+         LEFT JOIN drop_accounts a ON a.id = s.accountId
+         WHERE s.id = $id`,
+      )
+      .get({ $id: id, $now: new Date().toISOString() }) as FrameShareRow | null;
+    if (row === null) throw new Error(`unknown share: ${id}`);
+    return row;
+  }
+
+  /** Latest share per frame, claim URL blanked once expired. */
+  listFrameShares(repo?: string): FrameShareRow[] {
+    this.wipeExpiredDropSecrets();
+    return this.db
+      .query(
+        `SELECT s.id, s.frameId, s.frameVersion, s.url,
+                CASE WHEN s.expiresAt > $now AND a.claimUrl != '' THEN a.claimUrl ELSE '' END AS claimUrl,
+                s.createdAt, s.expiresAt
+         FROM frame_shares s
+         JOIN frames f ON f.id = s.frameId
+         LEFT JOIN drop_accounts a ON a.id = s.accountId
+         JOIN (
+           SELECT frameId, MAX(createdAt) AS createdAt FROM frame_shares GROUP BY frameId
+         ) latest ON latest.frameId = s.frameId AND latest.createdAt = s.createdAt
+         WHERE $repo IS NULL OR f.repo = $repo
+         ORDER BY s.createdAt DESC`,
+      )
+      .all({ $repo: repo ?? null, $now: new Date().toISOString() }) as FrameShareRow[];
   }
 }

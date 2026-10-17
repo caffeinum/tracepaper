@@ -313,6 +313,7 @@ Read the warnings in the panel — they are real:
 | `resolve_comment` | `{commentId, note?}` — closes the thread so it drops out of `get_comments`; `note` is also posted as an agent reply. Replies are resolved with their root, so your own note does not come back as fresh feedback on the next poll. |
 | `tidy_canvas` | `{frameIds?, yMin?, yMax?}` — re-packs frames into clean rows, largest first. No args repacks the whole canvas. `frameIds`, or `yMin`+`yMax` together, repacks only that scope; other frames stay put as obstacles. Moves frames only; html, comments and pins are untouched. |
 | `delete_frame` | `{frameId}` — removes a frame and its comments. Refuses while any unresolved human thread is still on it; resolve those, or `move_frame` to reposition. The canvas delete button is not guarded. |
+| `share_frame` | `{frameId}` — publishes that frame's HTML as a Cloudflare Drop page. Returns the live url, the claim url, when it was published, and when it expires. The claim url can take the account; give it only to the human. |
 
 ## The loop
 

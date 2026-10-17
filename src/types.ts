@@ -214,6 +214,14 @@ export const getFrameShape = {
 export const GetFrameInputSchema = z.object(getFrameShape);
 export type GetFrameInput = z.infer<typeof GetFrameInputSchema>;
 
+export const shareFrameShape = {
+  frameId: z
+    .string()
+    .describe("Frame to publish as a static page. Its current HTML is snapshotted; later edits are not on that URL until you share again."),
+};
+export const ShareFrameInputSchema = z.object(shareFrameShape);
+export type ShareFrameInput = z.infer<typeof ShareFrameInputSchema>;
+
 export const deleteFrameShape = {
   frameId: z.string(),
 };
