@@ -248,14 +248,34 @@ code {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 12px 10px 14px;
+  padding: 10px 12px 10px 10px;
   border-bottom: 1px solid var(--line);
 }
 
-.sidebar-title {
-  font-size: 12.5px;
+.list-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.list-tab {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.list-tab.is-on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
 }
 
 .sidebar-open {

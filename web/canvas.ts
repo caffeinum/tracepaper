@@ -252,6 +252,8 @@ const toolPan = el<HTMLButtonElement>("tool-pan");
 const toolComment = el<HTMLButtonElement>("tool-comment");
 const toolComments = el<HTMLButtonElement>("tool-comments");
 const commentsBadge = el<HTMLSpanElement>("tool-comments-badge");
+const tabComments = el<HTMLButtonElement>("list-tab-comments");
+const tabFrames = el<HTMLButtonElement>("list-tab-frames");
 const sidebar = el<HTMLElement>("sidebar");
 const sidebarClose = el<HTMLButtonElement>("sidebar-close");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
@@ -1477,6 +1479,10 @@ function timeAgo(iso: string): string {
 }
 
 function renderSidebar(): void {
+  if (listMode === "frames") {
+    renderFrameList();
+    return;
+  }
   commentList.replaceChildren();
   let open = 0;
   let total = 0;
@@ -1565,16 +1571,100 @@ function renderSidebar(): void {
   }
 
   statOpen.textContent = `${open} open`;
+  refreshCommentBadge(open);
+}
 
-  // The list is closed by default, so the badge is the only thing telling you there is
-  // feedback waiting behind it.
+function refreshCommentBadge(open = countOpenComments()): void {
   commentsBadge.textContent = String(open);
   commentsBadge.hidden = open === 0;
+}
+
+function countOpenComments(): number {
+  let open = 0;
+  for (const frame of frames.values()) {
+    open += rootComments(frame.id).filter((comment) => !comment.resolved).length;
+  }
+  return open;
 }
 
 // `HTMLElement.hidden` is boolean | "until-found", so the open state is tracked here rather
 // than read back off the DOM.
 let commentListOpen = false;
+let listMode: "comments" | "frames" = "comments";
+
+function setListMode(mode: "comments" | "frames"): void {
+  listMode = mode;
+  tabComments.classList.toggle("is-on", mode === "comments");
+  tabFrames.classList.toggle("is-on", mode === "frames");
+  tabComments.setAttribute("aria-selected", String(mode === "comments"));
+  tabFrames.setAttribute("aria-selected", String(mode === "frames"));
+  if (commentListOpen) renderSidebar();
+}
+
+function renderFrameList(): void {
+  commentList.replaceChildren();
+  const framesInView = orderedFrames();
+  statOpen.textContent = `${framesInView.length}`;
+  if (framesInView.length === 0) {
+    const note = document.createElement("div");
+    note.className = "sidebar-empty";
+    note.textContent = "No frames yet.";
+    commentList.appendChild(note);
+    refreshCommentBadge();
+    return;
+  }
+  for (const frame of framesInView) {
+    const entry = document.createElement("div");
+    entry.className = "entry";
+    entry.setAttribute("role", "listitem");
+    entry.classList.toggle("is-active", frame.id === selectedFrameId);
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "entry-open";
+
+    const body = document.createElement("div");
+    body.className = "entry-body";
+    const text = document.createElement("div");
+    text.className = "entry-text";
+    text.textContent = frame.name;
+    const meta = document.createElement("div");
+    meta.className = "entry-meta";
+    meta.append(document.createTextNode(`${Math.round(frame.width)}×${Math.round(frame.height)}`));
+
+    const share = shares.get(frame.id);
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    if (frame.kind !== "html") {
+      tag.textContent = frame.kind;
+    } else if (share === undefined) {
+      tag.textContent = "not shared";
+    } else {
+      tag.textContent = shareLabel(share);
+      if (share.claimUrl !== "" && Date.parse(share.expiresAt) > Date.now()) tag.classList.add("agent");
+    }
+    meta.appendChild(tag);
+    if (share !== undefined) {
+      const link = document.createElement("a");
+      link.href = share.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = "open";
+      meta.appendChild(link);
+    }
+
+    body.append(text, meta);
+    open.append(body);
+    open.addEventListener("click", () => {
+      setSelected(frame.id);
+      fitFrame(frame.id);
+      renderSidebar();
+    });
+    entry.appendChild(open);
+    commentList.appendChild(entry);
+  }
+  refreshCommentBadge();
+}
 
 function setCommentList(open: boolean): void {
   commentListOpen = open;
@@ -1627,6 +1717,7 @@ function setSelected(frameId: string | null): void {
   if (changed) cmd0FitsAll = false;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-selected", id === frameId);
   writeFrameHash(frameId);
+  syncShareButton();
 }
 
 /**
@@ -2078,6 +2169,8 @@ toolComment.addEventListener("click", () => {
   setTool(tool === "comment" ? "select" : "comment");
 });
 toolComments.addEventListener("click", () => toggleCommentList());
+tabComments.addEventListener("click", () => setListMode("comments"));
+tabFrames.addEventListener("click", () => setListMode("frames"));
 sidebarClose.addEventListener("click", () => setCommentList(false));
 el<HTMLButtonElement>("tool-zoom-in").addEventListener("click", () => {
   const { width, height } = stageSize();
@@ -2392,7 +2485,51 @@ async function setShare(action: "start" | "stop" | "read"): Promise<void> {
   renderShare(payload as ShareState);
 }
 
+let sharingFrame = false;
+
+function selectedHtmlFrame(): CanvasFrame | null {
+  if (selectedFrameId === null) return null;
+  const frame = frames.get(selectedFrameId);
+  if (!frame || frame.kind !== "html") return null;
+  return frame;
+}
+
+function syncShareButton(): void {
+  const frame = selectedHtmlFrame();
+  if (sharingFrame) return;
+  if (frame) {
+    toolShare.title = `Publish “${frame.name}”`;
+    toolShareLabel.textContent = "Share";
+    return;
+  }
+  toolShare.title = "Public link to this canvas";
+  toolShareLabel.textContent = "Share";
+}
+
+async function publishSelectedFrame(frameId: string): Promise<void> {
+  if (sharingFrame) return;
+  sharingFrame = true;
+  toolShare.disabled = true;
+  toolShareLabel.textContent = "Sharing…";
+  try {
+    const share = toShare(await postJson(`/api/frames/${frameId}/share`, {}));
+    shares.set(share.frameId, share);
+    setListMode("frames");
+    setCommentList(true);
+    renderAll();
+  } finally {
+    sharingFrame = false;
+    toolShare.disabled = false;
+    syncShareButton();
+  }
+}
+
 toolShare.addEventListener("click", () => {
+  const frame = selectedHtmlFrame();
+  if (frame) {
+    publishSelectedFrame(frame.id).catch(fail);
+    return;
+  }
   const opening = sharePanel.hidden;
   sharePanel.hidden = !opening;
   if (opening) void setShare("read");
