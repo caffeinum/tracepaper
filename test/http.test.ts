@@ -252,7 +252,10 @@ describe("GET /f/:id", () => {
     const served = await (await fetch(`${base}/f/${frame.id}`)).text();
 
     // Everything the agent wrote survives, in order.
-    expect(served).toContain("<head><title>t</title></head>");
+    expect(served).toContain("<title>t</title>");
+    // Zoom lock is injected into <head> so it is installed before the page can be pinched.
+    expect(served.indexOf("gesturestart")).toBeGreaterThan(-1);
+    expect(served.indexOf("gesturestart")).toBeLessThan(served.indexOf("</head>"));
     expect(served).toContain("ok");
     // Plus one script, inside body: a sandboxed frame is cross-origin, so once focus is inside
     // it `esc` never reaches the canvas. postMessage is the only way back out.

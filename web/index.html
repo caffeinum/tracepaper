@@ -2,11 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no" />
     <meta name="color-scheme" content="light dark" />
     <title>tracepaper canvas</title>
     <link rel="icon" href="/icon.svg" />
     <link rel="stylesheet" href="/style.css" />
+    <script>
+      // Browser page zoom blows up the chrome. Block it as early as possible, in the capture
+      // phase, before the canvas bundle loads. Canvas zoom (the toolbar, pinch-as-pan-zoom of
+      // the board) still runs: this only calls preventDefault, it does not stop the event.
+      (function () {
+        function zoomKey(e) {
+          if (!(e.ctrlKey || e.metaKey)) return false;
+          var k = e.key;
+          var c = e.code;
+          return (
+            k === "=" || k === "+" || k === "-" || k === "_" || k === "0" ||
+            c === "Equal" || c === "Minus" || c === "Digit0" ||
+            c === "NumpadAdd" || c === "NumpadSubtract" || c === "Numpad0"
+          );
+        }
+        addEventListener("wheel", function (e) {
+          if (e.ctrlKey || e.metaKey) e.preventDefault();
+        }, { capture: true, passive: false });
+        addEventListener("keydown", function (e) {
+          if (zoomKey(e)) e.preventDefault();
+        }, { capture: true });
+        addEventListener("gesturestart", function (e) { e.preventDefault(); }, { capture: true, passive: false });
+        addEventListener("gesturechange", function (e) { e.preventDefault(); }, { capture: true, passive: false });
+        addEventListener("gestureend", function (e) { e.preventDefault(); }, { capture: true, passive: false });
+      })();
+    </script>
   </head>
   <body>
     <div id="app">

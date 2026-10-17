@@ -129,6 +129,8 @@ html,
 body {
   height: 100%;
   margin: 0;
+  /* Double-tap zoom is a browser zoom. Pan still works. */
+  touch-action: manipulation;
 }
 
 body {

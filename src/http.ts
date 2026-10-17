@@ -595,8 +595,32 @@ async function handleStatic(ctx: Context, path: string): Promise<Response> {
  *    scroll, rAF-throttled to one message per frame) so the canvas can keep pins on the content.
  *
  * Appended to every served frame, including full documents the agent authored. It touches nothing
- * else: two listeners, no globals, and it is inert outside an iframe.
+ * else: two listeners, no globals, and it is inert outside an iframe. A second, earlier script
+ * (ZOOM_LOCK) is injected into <head> so a pinch during load cannot zoom the browser tab — a
+ * listener at the end of <body> arrives too late for that, and a cross-origin frame's wheel
+ * never reaches the canvas page.
  */
+const ZOOM_LOCK = `<script>
+(function(){
+  function zoomKey(e){
+    if (!(e.ctrlKey || e.metaKey)) return false;
+    var k = e.key, c = e.code;
+    return k === "=" || k === "+" || k === "-" || k === "_" || k === "0"
+      || c === "Equal" || c === "Minus" || c === "Digit0"
+      || c === "NumpadAdd" || c === "NumpadSubtract" || c === "Numpad0";
+  }
+  addEventListener("wheel", function(e){
+    if (e.ctrlKey || e.metaKey) e.preventDefault();
+  }, {capture:true, passive:false});
+  addEventListener("keydown", function(e){
+    if (zoomKey(e)) e.preventDefault();
+  }, {capture:true});
+  addEventListener("gesturestart", function(e){ e.preventDefault(); }, {capture:true, passive:false});
+  addEventListener("gesturechange", function(e){ e.preventDefault(); }, {capture:true, passive:false});
+  addEventListener("gestureend", function(e){ e.preventDefault(); }, {capture:true, passive:false});
+})();
+</script>`;
+
 const ESCAPE_BRIDGE = `<script>
 (function(){
   if (window.parent === window) return;
@@ -633,15 +657,22 @@ const ESCAPE_BRIDGE = `<script>
 })();
 </script>`;
 
+function withZoomLock(html: string): string {
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (open) => `${open}${ZOOM_LOCK}`);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (open) => `${open}<head>${ZOOM_LOCK}</head>`);
+  return ZOOM_LOCK + html;
+}
+
 function asDocument(html: string): string {
   if (/<html[\s>]/i.test(html)) {
-    return /<\/body\s*>/i.test(html)
-      ? html.replace(/<\/body\s*>/i, `${ESCAPE_BRIDGE}</body>`)
-      : html + ESCAPE_BRIDGE;
+    const locked = withZoomLock(html);
+    return /<\/body\s*>/i.test(locked)
+      ? locked.replace(/<\/body\s*>/i, `${ESCAPE_BRIDGE}</body>`)
+      : locked + ESCAPE_BRIDGE;
   }
   return `<!doctype html>
 <html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base target="_blank"></head>
+<head>${ZOOM_LOCK}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no"><base target="_blank"></head>
 <body>${html}${ESCAPE_BRIDGE}</body>
 </html>`;
 }
