@@ -45,7 +45,7 @@ tests:
           R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
           # one && chain: a `!` line on its own would not fail the check
           test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
     timeout: 900
 
   # configured: the local build is installed, nothing wired up. Does the agent notice it
@@ -75,7 +75,7 @@ tests:
       - run: |
           R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
           test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
     timeout: 900
 
   # configured: MCP connected, the human already pinned two notes on a pricing mockup.
@@ -107,5 +107,5 @@ tests:
       - run: |
           R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
           test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
     timeout: 900
