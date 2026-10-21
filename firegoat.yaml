@@ -84,7 +84,7 @@ tests:
     install:
       - npm init -y >/dev/null && npm install "$FIREGOAT_OUT"/tracepaper-*.tgz >/dev/null
       - mkdir -p .canvas && bun "$FIREGOAT_OUT/seed-feedback.ts" .canvas/tracepaper.db "$FIREGOAT_OUT/pricing.html" evals >/dev/null
-    claude_args: [--mcp-config, $FIREGOAT_OUT/mcp.json]
+    harness_args: [--mcp-config, $FIREGOAT_OUT/mcp.json]
     prompt: >-
       I left a couple of notes on the pricing page mockup. Go through them, make the
       changes, and tell me in each note's thread when it's done. Keep it minimal.
