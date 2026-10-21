@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tracepaper": {
+      "command": "./node_modules/.bin/tracepaper",
+      "env": {
+        "HOME": "${FIREGOAT_HOME}",
+        "TRACEPAPER_DB": "${FIREGOAT_WORKDIR}/.canvas/tracepaper.db",
+        "TRACEPAPER_REPO": "evals"
+      }
+    }
+  }
+}

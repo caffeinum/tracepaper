@@ -1,0 +1,111 @@
+# firegoat.yaml: evals for how well coding agents use tracepaper.
+# Run: npx -y firegoat@latest eval   (needs bun and sqlite3 on PATH; no credentials)
+#
+# Every run has its own HOME, so ~/.tracepaper (db, server.json, pid) is per run and the
+# real canvas on :4321 is never touched. Each workdir gets its own `git init`, because the
+# runs live inside this repo: without it, npx resolves the repo's own bin and git shows
+# tracepaper's history.
+
+runs: 1
+
+build:
+  - npm pack --pack-destination "$FIREGOAT_OUT" >/dev/null
+  - cp -R fixtures/. "$FIREGOAT_OUT"
+
+install: git init -q
+
+cleanup: sh "$FIREGOAT_OUT/stop-canvas.sh"
+
+tests:
+  # zero-start: an ordinary landing-page project, nothing installed, no product name.
+  # Does the agent find tracepaper cold and get a reviewable canvas up hands-off?
+  - name: zero-start
+    install: cp -R "$FIREGOAT_OUT/landing/." .
+    prompt: >-
+      I'm iterating on this landing page's hero with you and reading screenshots in
+      chat is painful. I want a canvas in my browser where you put design variations
+      side by side, I pin comments right on them, and you read my comments back and fix
+      things. Set that up and put 3 hero variations on it, then give me the link. Keep
+      it minimal.
+    end_goal: >-
+      The agent finds tracepaper (bunx/npx github:caffeinum/tracepaper or the npm
+      package), pushes 3 hero frames onto its canvas (CLI `push`, or MCP after adding
+      it), and hands the user a canvas URL that is actually served. Or it stops at the
+      first real blocker (e.g. Bun missing) naming the one step left. A hand-rolled
+      canvas/comment app does not count.
+    checks:
+      - run: >-
+          grep -Eq '^\[[0-9]+\] (\$ .*(github:caffeinum/tracepaper|(npx|bunx|bun x|/|^\[[0-9]+\] \$ )tracepaper( |@)|tracepaper (push|up|serve|list|status))|mcp__tracepaper__)' "$FIREGOAT_TRANSCRIPT"
+      - run: >-
+          db="$FIREGOAT_HOME/.tracepaper/tracepaper.db"; test -f "$db" &&
+          test "$(sqlite3 "$db" "select count(*) from frames where kind='html'")" -ge 3
+      - run: >-
+          grep -Eq '^agent: .*https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_TRANSCRIPT"
+      - run: |
+          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
+          # one && chain: a `!` line on its own would not fail the check
+          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+    timeout: 900
+
+  # configured: the local build is installed, nothing wired up. Does the agent notice it
+  # and drive it (CLI or its own server) instead of opening a plain html file?
+  - name: mockups-from-installed
+    install: npm init -y >/dev/null && npm install "$FIREGOAT_OUT"/tracepaper-*.tgz >/dev/null
+    prompt: >-
+      Mock up two options for a pricing page so I can look at them side by side in my
+      browser and leave comments on them. Give me the link. Keep it minimal. What's
+      installed in this folder is the build under test; don't reinstall or upgrade it
+      from the registry.
+    end_goal: >-
+      The agent notices tracepaper in node_modules and uses it (CLI `push`, or by
+      running its server), so two pricing frames are on the tracepaper canvas, a canvas
+      is served for the human, and the agent gives its URL. A plain HTML file opened in
+      the browser does not count.
+    checks:
+      - run: test -x "$FIREGOAT_WORKDIR/node_modules/.bin/tracepaper"
+      - run: >-
+          db="$FIREGOAT_HOME/.tracepaper/tracepaper.db"; test -f "$db" &&
+          test "$(sqlite3 "$db" "select count(*) from frames where kind='html'")" -ge 2
+      - run: >-
+          grep -Eq '^agent: .*https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_TRANSCRIPT"
+      - run: >-
+          test -s "$FIREGOAT_TRANSCRIPT" &&
+          ! grep -Eq '^\[[0-9]+\] \$ .*((npm (install|i|add)|pnpm (add|dlx)|bun add) .*tracepaper|(npx|bunx|yarn dlx) .*(tracepaper@|github:caffeinum/tracepaper))' "$FIREGOAT_TRANSCRIPT"
+      - run: |
+          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
+          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+    timeout: 900
+
+  # configured: MCP connected, the human already pinned two notes on a pricing mockup.
+  # Does the agent read them, edit the frame in place, and answer in each thread?
+  - name: address-feedback
+    install:
+      - npm init -y >/dev/null && npm install "$FIREGOAT_OUT"/tracepaper-*.tgz >/dev/null
+      - mkdir -p .canvas && bun "$FIREGOAT_OUT/seed-feedback.ts" .canvas/tracepaper.db "$FIREGOAT_OUT/pricing.html" evals >/dev/null
+    claude_args: [--mcp-config, $FIREGOAT_OUT/mcp.json]
+    prompt: >-
+      I left a couple of notes on the pricing page mockup. Go through them, make the
+      changes, and tell me in each note's thread when it's done. Keep it minimal.
+      What's installed in this folder is the build under test; don't reinstall or
+      upgrade it from the registry.
+    end_goal: >-
+      The agent reads both human comments with get_comments, reads the frame with
+      get_frame, updates the same Pricing frame in place (version 2+, no new frame) so
+      the trial button sits under the headline and is green and the Enterprise tier is
+      gone, and replies to or resolves each of the two threads.
+    checks:
+      - run: >-
+          grep -Eq '^\[[0-9]+\] mcp__tracepaper__get_comments' "$FIREGOAT_TRANSCRIPT"
+      - run: >-
+          test "$(sqlite3 "$FIREGOAT_WORKDIR/.canvas/tracepaper.db" "select count(*) from frames where name='Pricing' and version>=2 and html not like '%Enterprise%'")" -eq 1
+      - run: >-
+          test "$(sqlite3 "$FIREGOAT_WORKDIR/.canvas/tracepaper.db" "select count(*) from frames where kind='html'")" -eq 1
+      - run: >-
+          test "$(sqlite3 "$FIREGOAT_WORKDIR/.canvas/tracepaper.db" "select count(*) from comments c where c.author='human' and c.parentId is null and (c.resolved=1 or exists (select 1 from comments r where r.parentId=c.id and r.author='agent'))")" -eq 2
+      - run: |
+          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
+          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
+            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" | grep -q .)
+    timeout: 900
