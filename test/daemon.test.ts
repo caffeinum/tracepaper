@@ -46,3 +46,23 @@ describe("daemon control (no server running)", () => {
     expect(await status(config)).toBe(1);
   });
 });
+
+describe("daemon status beside a server on another db", () => {
+  test("names the other server instead of a bare `stopped`", async () => {
+    const foreign = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ ok: true, frames: 0, comments: 0 }) });
+    const port = foreign.port;
+    if (port === undefined) throw new Error("foreign test server bound no port");
+    const written: string[] = [];
+    const origOut = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string) => (written.push(chunk), true);
+    try {
+      expect(await status({ ...config, port })).toBe(1);
+    } finally {
+      process.stdout.write = origOut;
+      foreign.stop(true);
+    }
+    const text = written.join("");
+    expect(text).toContain("another tracepaper server, on a different db");
+    expect(text).toContain(config.dbPath);
+  });
+});

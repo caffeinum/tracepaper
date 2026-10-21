@@ -63,6 +63,14 @@ describe("tracepaper cli", () => {
     expect(out).toContain("not running");
   });
 
+  test("push --json says why canvasUrl is null", async () => {
+    await cli("push", frameFile("<h1>hi</h1>"), "--json");
+    restore();
+    const pushed = JSON.parse(out) as { canvasUrl: string | null; canvasHint?: string };
+    expect(pushed.canvasUrl).toBeNull();
+    expect(pushed.canvasHint).toContain("tracepaper up");
+  });
+
   test("push --json round-trips through list and get", async () => {
     await cli("push", frameFile("<p>body</p>"), "--name", "solo", "--json");
     const pushed = JSON.parse(out) as { frame: { id: string; html: string } };
