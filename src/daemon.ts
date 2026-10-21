@@ -49,6 +49,15 @@ async function probe(config: Config): Promise<HealthNow> {
   }
 }
 
+async function answersHealth(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function mcpUrl(canvasUrl: string): string {
   return `${canvasUrl.replace(/\/+$/, "")}/mcp`;
 }
@@ -147,7 +156,14 @@ export async function down(config: Config): Promise<number> {
 export async function status(config: Config): Promise<number> {
   const now = await probe(config);
   if (now === null) {
-    process.stdout.write("stopped\n");
+    const other = await answersHealth(`http://${config.host}:${config.port}`);
+    process.stdout.write(
+      other
+        ? `stopped — no server for this db (${config.dbPath})\n` +
+            `  http://${config.host}:${config.port} is another tracepaper server, on a different db.\n` +
+            "  Set TRACEPAPER_DB to that server's db to use it, or `tracepaper up` to start one for this db.\n"
+        : "stopped — `tracepaper up` starts it\n",
+    );
     return 1;
   }
   process.stdout.write(
