@@ -80,6 +80,13 @@ async function liveCanvasUrl(config: Config): Promise<string | null> {
   }
 }
 
+/** Why `canvasUrl` is null, in words an agent can act on instead of guessing. */
+const NO_CANVAS_HINT = "no canvas is serving this db — run `tracepaper up` to view it; writes are saved either way";
+
+function canvasFields(canvas: string | null): { canvasUrl: string | null; canvasHint?: string } {
+  return canvas === null ? { canvasUrl: null, canvasHint: NO_CANVAS_HINT } : { canvasUrl: `${canvas}/` };
+}
+
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -148,12 +155,12 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
             : store.updateFrameHtml(frameId, html, { name, width, height });
         const canvas = await liveCanvasUrl(config);
         if (json) {
-          out(JSON.stringify({ frame, canvasUrl: canvas === null ? null : `${canvas}/` }, null, 2));
+          out(JSON.stringify({ frame, ...canvasFields(canvas) }, null, 2));
         } else {
           out(`${frame.id}  ${frame.width}×${frame.height} @ (${frame.x}, ${frame.y})`);
           out(
             canvas === null
-              ? "canvas: not running — start it with `tracepaper serve` to view (the frame is saved)"
+              ? "canvas: not running — start it with `tracepaper up` to view (the frame is saved)"
               : `canvas: ${canvas}/  ·  frame: ${canvas}/f/${frame.id}`,
           );
         }
@@ -233,7 +240,7 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
         const frames = store.listFrames(repoFlag(flags));
         const canvas = await liveCanvasUrl(config);
         if (json) {
-          out(JSON.stringify({ frames, canvasUrl: canvas === null ? null : `${canvas}/` }, null, 2));
+          out(JSON.stringify({ frames, ...canvasFields(canvas) }, null, 2));
           return 0;
         }
         if (frames.length === 0) {
