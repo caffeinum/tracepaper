@@ -14,7 +14,8 @@
     }
   },
   "env": {
-    "TRACEPAPER_HOST": "0.0.0.0",
-    "TRACEPAPER_PORT": "4321"
+    "TRACEPAPER_HOST": "127.0.0.1",
+    "TRACEPAPER_PORT": "4321",
+    "TRACEPAPER_STRICT_PORT": "1"
   }
 }
