@@ -107,12 +107,11 @@ export class Canvas extends DurableObject<Env> {
 
   snapshot(slug: string, body: PublishBody): { version: number; updatedAt: number } {
     const now = Date.now();
-    const current = this.ctx.storage.sql
-      .exec<{ version: number }>("SELECT version FROM meta WHERE id = ?", slug)
-      .toArray()[0];
-    const version = (current?.version ?? 0) + 1;
-    this.ctx.storage.sql.exec("BEGIN");
-    try {
+    const version = this.ctx.storage.transactionSync(() => {
+      const current = this.ctx.storage.sql
+        .exec<{ version: number }>("SELECT version FROM meta WHERE id = ?", slug)
+        .toArray()[0];
+      const version = (current?.version ?? 0) + 1;
       const previous = this.ctx.storage.sql
         .exec<{ id: string; html: string; version: number }>("SELECT id, html, version FROM frames")
         .toArray();
@@ -156,11 +155,8 @@ export class Canvas extends DurableObject<Env> {
         version,
         now,
       );
-      this.ctx.storage.sql.exec("COMMIT");
-    } catch (error) {
-      this.ctx.storage.sql.exec("ROLLBACK");
-      throw error;
-    }
+      return version;
+    });
     const message = JSON.stringify({ type: "updated", version });
     for (const socket of this.ctx.getWebSockets()) socket.send(message);
     return { version, updatedAt: now };
