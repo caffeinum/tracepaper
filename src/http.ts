@@ -5,7 +5,7 @@ import { z } from "zod";
 import { toFramePayload, type Bus, type BusEvent } from "./events.ts";
 import { SERVER_VERSION } from "./mcp.ts";
 import { createMcpHttpHandler, type McpHttpHandler } from "./mcp-http.ts";
-import { findChrome, renderCached, renderPng } from "./screenshot.ts";
+import { findChrome, findWebkit, renderCached, renderPng, renderWebkitPng } from "./screenshot.ts";
 import { shareFrame } from "./share.ts";
 import type { Store } from "./store.ts";
 import type { Tunnel } from "./tunnel.ts";
@@ -424,12 +424,13 @@ async function handleFramePng(ctx: Context, id: string, url: URL): Promise<Respo
   // Throws "unknown frame …" for a bad id, which route's catch maps to the same 404 JSON as /f/:id.
   const frame = ctx.store.getFrame(id);
 
-  const chrome = findChrome();
-  if (chrome === null) {
+  const webkit = findWebkit();
+  const chrome = webkit === null ? findChrome() : null;
+  if (webkit === null && chrome === null) {
     return json(
       {
         error:
-          "No Chrome/Chromium found for screenshots. Install Chrome or set TRACEPAPER_CHROME to its path.",
+          "No preview renderer. Need TRACEPAPER_WEBKIT (webkit-cli) or TRACEPAPER_CHROME.",
       },
       501,
     );
@@ -445,7 +446,9 @@ async function handleFramePng(ctx: Context, id: string, url: URL): Promise<Respo
   let bytes: Uint8Array;
   try {
     bytes = await renderCached(id, frame.version, () =>
-      renderPng({ chrome, url: target, width: frame.width, height: frame.height }),
+      webkit !== null
+        ? renderWebkitPng({ bin: webkit, url: target, width: frame.width, height: frame.height })
+        : renderPng({ chrome: chrome as string, url: target, width: frame.width, height: frame.height }),
     );
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : String(error));
@@ -645,6 +648,7 @@ const ESCAPE_BRIDGE = `<script>
 (function(){
   if (window.parent === window) return;
   addEventListener("keydown", function (e) {
+    if (e.key === "Meta") parent.postMessage({ __tracepaper: "meta", down: true }, "*");
     if (e.key === "Escape") {
       parent.postMessage({ __tracepaper: "escape" }, "*");
       return;
@@ -655,6 +659,9 @@ const ESCAPE_BRIDGE = `<script>
       e.preventDefault();
       parent.postMessage({ __tracepaper: "zoom", key: e.key }, "*");
     }
+  }, true);
+  addEventListener("keyup", function (e) {
+    if (e.key === "Meta") parent.postMessage({ __tracepaper: "meta", down: false }, "*");
   }, true);
   // A pinch over the frame would zoom the browser chrome. Swallow it and zoom the board instead.
   // Plain scroll still belongs to the page.

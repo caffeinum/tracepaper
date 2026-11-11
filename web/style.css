@@ -621,6 +621,26 @@ code {
   cursor: grabbing;
 }
 
+/* Cmd held: the next drag moves a frame, not the board. The iframe must not eat the press. */
+.stage[data-cursor="move"],
+.stage[data-cursor="move"] .viewport,
+.stage[data-cursor="move"] .frame,
+.stage[data-cursor="move"] .frame-catch,
+.stage[data-cursor="move"] .frame-label,
+.stage[data-cursor="move"] .frame-name,
+.stage[data-cursor="move"] .frame-name.is-handle {
+  cursor: move;
+}
+
+.stage[data-cursor="move"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.stage[data-cursor="move"] .frame iframe {
+  pointer-events: none;
+}
+
 /* A teardrop pin cursor — the same shape as the pins it drops — so comment mode is legible without
    reading the toolbar, and the hotspot is the tip, where the pin will land. The overlay above each
    iframe needs it too. */
@@ -820,6 +840,23 @@ code {
 
 .frame.is-interactive .frame-body {
   box-shadow: var(--shadow-2);
+}
+
+/* Fit-zoom: 40 wobbly clips and shadows are what makes pan feel stuck. A plain edge is enough there. */
+.world.is-far .frame-sketch,
+.world.is-far .frame-sketch-fill {
+  display: none;
+}
+
+.world.is-far .frame-thumb,
+.world.is-far .frame iframe {
+  clip-path: none !important;
+  border-radius: 2px;
+}
+
+.world.is-far .frame-body {
+  box-shadow: none;
+  background: var(--sketch-paper);
 }
 
 /* Hand-drawn frame outline. The fill pass sits behind the iframe (paper backing, no stroke); the

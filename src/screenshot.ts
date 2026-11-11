@@ -90,6 +90,51 @@ export const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1
  * Render `url` to PNG bytes with a headless Chrome. The frame document is static, so headless
  * `--screenshot` exits on its own; the timeout only guards against a wedged process.
  */
+export function findWebkit(env: NodeJS.ProcessEnv = process.env): string | null {
+  const override = env["TRACEPAPER_WEBKIT"];
+  if (override !== undefined && override !== "" && existsSync(override)) return override;
+  const cli = Bun.which("webkit-cli");
+  if (cli !== null) return cli;
+  const home = env["HOME"];
+  if (home === undefined || home === "") return null;
+  const bin = join(home, ".tracepaper/bin/webkit-shot");
+  return existsSync(bin) ? bin : null;
+}
+
+/** `webkit-cli shot --size WxH` when the binary is webkit-cli; the local helper otherwise. */
+export async function renderWebkitPng(opts: { bin: string; url: string; width: number; height: number }): Promise<Uint8Array> {
+  const width = clampDim(opts.width);
+  const height = clampDim(opts.height);
+  const dir = mkdtempSync(join(tmpdir(), "tracepaper-webkit-"));
+  const shot = join(dir, "shot.png");
+  const cli = opts.bin.endsWith("webkit-cli");
+  const args = cli
+    ? ["shot", opts.url, shot, "--size", `${width}x${height}`]
+    : [opts.url, String(width), String(height), shot];
+  try {
+    const proc = Bun.spawn([opts.bin, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exit = await Promise.race([
+      proc.exited,
+      Bun.sleep(RENDER_TIMEOUT_MS).then(() => {
+        proc.kill();
+        return -1;
+      }),
+    ]);
+    if (!existsSync(shot)) {
+      const err = await new Response(proc.stderr).text();
+      throw new Error(`webkit-shot exited ${exit}: ${err.slice(0, 400)}`);
+    }
+    const bytes = new Uint8Array(readFileSync(shot));
+    if (bytes.length === 0) throw new Error("webkit-shot produced an empty screenshot");
+    return bytes;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export async function renderPng(opts: RenderPngOptions): Promise<Uint8Array> {
   const width = clampDim(opts.width);
   const height = clampDim(opts.height);
