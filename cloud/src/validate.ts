@@ -5,7 +5,7 @@ export class PublishError extends Error {}
 export const MAX_HTML_BYTES = 5_000_000;
 export const MAX_PUBLISH_BYTES = 20_000_000;
 export const MAX_FRAMES = 200;
-export const MAX_NAME = 120;
+export const MAX_NAME = 200;
 export const MAX_DIM = 8192;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
