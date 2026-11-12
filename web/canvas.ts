@@ -398,10 +398,10 @@ function paintView(): void {
   let cell = GRID * view.scale;
   while (cell < 14) cell *= 4;
   while (cell > 96) cell /= 4;
-  const major = cell * 4;
-  const origin = `${view.x}px ${view.y}px`;
-  viewport.style.backgroundSize = `${cell}px ${cell}px, ${cell}px ${cell}px, ${major}px ${major}px, ${major}px ${major}px`;
-  viewport.style.backgroundPosition = `${origin}, ${origin}, ${origin}, ${origin}`;
+  // Integer origin. A fractional background-position paints each 1px line twice.
+  const origin = `${Math.round(view.x)}px ${Math.round(view.y)}px`;
+  viewport.style.backgroundSize = `${cell}px ${cell}px, ${cell}px ${cell}px`;
+  viewport.style.backgroundPosition = `${origin}, ${origin}`;
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
   if (panel) positionPanel();

@@ -584,19 +584,14 @@ code {
   background: var(--ground);
 }
 
-/* Blueprint hairline grid: fine cells plus a stronger line every fourth. Both scales and their
-   positions are driven from canvas.ts (applyView) so the paper stays registered to the world under
-   pan and zoom. Layer order matches the four background-size / -position values set there:
-   minor-V, minor-H, major-V, major-H. */
+/* One hairline grid. A second, heavier grid every fourth cell read as a double grid. */
 .viewport {
   position: absolute;
   inset: 0;
   touch-action: none;
   background-image:
     linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-    linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
-    linear-gradient(var(--grid-major) 1px, transparent 1px);
+    linear-gradient(var(--grid) 1px, transparent 1px);
   background-repeat: repeat;
   cursor: default;
 }

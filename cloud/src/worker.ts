@@ -279,47 +279,73 @@ function viewerHtml(slug: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${slug}</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #f4f1ea; color: #1c1915; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
-  #bar { position: sticky; top: 0; display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; background: #f4f1ea; border-bottom: 1px solid #d9d2c5; }
-  #world { position: relative; transform-origin: 0 0; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f1ea; color: #1c1915; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  #stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; background-color: #f4f1ea; background-image: linear-gradient(90deg, #e4ddd2 1px, transparent 1px), linear-gradient(#e4ddd2 1px, transparent 1px); }
+  #stage.is-panning { cursor: grabbing; }
+  #bar { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; background: #f4f1eacc; border-radius: 8px; }
+  #world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
   .frame { position: absolute; background: white; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
-  iframe { border: 0; width: 100%; height: 100%; background: white; }
-  .text { display: flex; align-items: center; padding: 0 8px; }
+  iframe { border: 0; width: 100%; height: 100%; background: white; pointer-events: none; }
+  .text { display: flex; align-items: center; padding: 0 8px; background: transparent; }
   .section { border: 1px dashed #8a8175; background: transparent; }
   .section span { position: absolute; top: -18px; left: 0; font-size: 12px; color: #6d645b; }
 </style>
-<div id="bar"><strong id="title"></strong><span id="meta"></span></div>
-<div id="world"></div>
+<div id="stage">
+  <div id="bar"><strong id="title"></strong><span id="meta"></span></div>
+  <div id="world"></div>
+</div>
 <script>
 const slug = ${JSON.stringify(slug)};
+const stage = document.getElementById("stage");
 const world = document.getElementById("world");
 const title = document.getElementById("title");
 const meta = document.getElementById("meta");
+const view = { x: 40, y: 48, scale: 1 };
 let version = 0;
+let frames = [];
 
-function place(canvas) {
-  title.textContent = canvas.name;
-  meta.textContent = canvas.frames.length + " frames · v" + canvas.version;
-  version = canvas.version;
-  world.replaceChildren();
-  if (canvas.frames.length === 0) return;
+function paint() {
+  world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
+  let cell = 48 * view.scale;
+  while (cell < 16) cell *= 4;
+  while (cell > 160) cell /= 4;
+  const origin = Math.round(view.x) + "px " + Math.round(view.y) + "px";
+  stage.style.backgroundSize = cell + "px " + cell + "px, " + cell + "px " + cell + "px";
+  stage.style.backgroundPosition = origin + ", " + origin;
+  meta.textContent = frames.length + " frames · v" + version + " · " + Math.round(view.scale * 100) + "%";
+}
+
+function fit() {
+  if (frames.length === 0) return;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const frame of canvas.frames) {
+  for (const frame of frames) {
     minX = Math.min(minX, frame.x);
     minY = Math.min(minY, frame.y);
     maxX = Math.max(maxX, frame.x + frame.width);
     maxY = Math.max(maxY, frame.y + frame.height);
   }
-  const pad = 48;
-  world.style.width = (maxX - minX + pad * 2) + "px";
-  world.style.height = (maxY - minY + pad * 2) + "px";
-  const scale = Math.min(1, (window.innerWidth - 24) / (maxX - minX + pad * 2));
-  world.style.transform = "scale(" + scale + ")";
-  for (const frame of canvas.frames) {
+  const pad = 80;
+  const scale = Math.min(
+    (stage.clientWidth - pad * 2) / Math.max(1, maxX - minX),
+    (stage.clientHeight - pad * 2) / Math.max(1, maxY - minY),
+    1,
+  );
+  view.scale = Math.max(0.08, scale);
+  view.x = stage.clientWidth / 2 - ((minX + maxX) / 2) * view.scale;
+  view.y = stage.clientHeight / 2 - ((minY + maxY) / 2) * view.scale;
+  paint();
+}
+
+function place(canvas) {
+  title.textContent = canvas.name;
+  version = canvas.version;
+  frames = canvas.frames;
+  world.replaceChildren();
+  for (const frame of frames) {
     const box = document.createElement("div");
     box.className = "frame " + frame.kind;
-    box.style.left = (frame.x - minX + pad) + "px";
-    box.style.top = (frame.y - minY + pad) + "px";
+    box.style.left = frame.x + "px";
+    box.style.top = frame.y + "px";
     box.style.width = frame.width + "px";
     box.style.height = frame.height + "px";
     if (frame.kind === "html") {
@@ -339,7 +365,48 @@ function place(canvas) {
     }
     world.append(box);
   }
+  fit();
 }
+
+stage.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  if (event.ctrlKey || event.metaKey) {
+    const next = Math.min(2.5, Math.max(0.08, view.scale * Math.exp(-event.deltaY * 0.01)));
+    const rect = stage.getBoundingClientRect();
+    const ax = event.clientX - rect.left;
+    const ay = event.clientY - rect.top;
+    const wx = (ax - view.x) / view.scale;
+    const wy = (ay - view.y) / view.scale;
+    view.scale = next;
+    view.x = ax - wx * next;
+    view.y = ay - wy * next;
+  } else {
+    view.x -= event.deltaX;
+    view.y -= event.deltaY;
+  }
+  paint();
+}, { passive: false });
+
+let drag = null;
+stage.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  drag = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
+  stage.classList.add("is-panning");
+  stage.setPointerCapture(event.pointerId);
+});
+stage.addEventListener("pointermove", (event) => {
+  if (drag === null) return;
+  view.x = drag.vx + event.clientX - drag.x;
+  view.y = drag.vy + event.clientY - drag.y;
+  paint();
+});
+stage.addEventListener("pointerup", () => {
+  drag = null;
+  stage.classList.remove("is-panning");
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "0") fit();
+});
 
 async function load() {
   const res = await fetch("/api/canvases/" + slug);
