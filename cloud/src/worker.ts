@@ -540,6 +540,23 @@ function place(canvas) {
     world.append(box);
   }
   fit();
+  const match = /^#frame=(frm_[0-9a-f]{12})$/.exec(location.hash);
+  if (match) focus(frames.find((frame) => frame.id === match[1]));
+}
+
+function focus(frame) {
+  if (!frame) return;
+  const pad = 48;
+  const bar = 56;
+  const scale = Math.min(
+    (stage.clientWidth - pad * 2) / frame.width,
+    (stage.clientHeight - pad * 2 - bar) / frame.height,
+    1,
+  );
+  view.scale = scale;
+  view.x = stage.clientWidth / 2 - (frame.x + frame.width / 2) * scale;
+  view.y = (bar + stage.clientHeight) / 2 - (frame.y + frame.height / 2) * scale;
+  paint();
 }
 
 stage.addEventListener("wheel", (event) => {
