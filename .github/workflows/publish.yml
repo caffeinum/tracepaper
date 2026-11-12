@@ -1,0 +1,51 @@
+name: publish canvases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - cloud/fixtures/*.json
+  workflow_dispatch:
+
+concurrency:
+  group: publish-canvases
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: put fixtures
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          ORIGIN: https://tracepaper.theisease.workers.dev
+        run: |
+          set -euo pipefail
+          if [ -z "${PUBLISH_TOKEN}" ]; then
+            echo "PUBLISH_TOKEN is not set. writes are refused until the repo secret exists."
+            exit 1
+          fi
+          shopt -s nullglob
+          files=(cloud/fixtures/*.json)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no fixtures in cloud/fixtures"
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            slug="$(basename "$file" .json)"
+            echo "PUT ${slug}"
+            code="$(curl -sS -o /tmp/put.json -w "%{http_code}" -X PUT \
+              -H "authorization: Bearer ${PUBLISH_TOKEN}" \
+              -H "content-type: application/json" \
+              --data-binary @"${file}" \
+              "${ORIGIN}/api/canvases/${slug}")"
+            echo "  ${code}"
+            cat /tmp/put.json
+            echo
+            if [ "${code}" != "200" ]; then
+              exit 1
+            fi
+          done
