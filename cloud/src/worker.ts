@@ -63,6 +63,28 @@ export class Registry extends DurableObject<Env> {
     return row === undefined ? null : row.canvas_id;
   }
 
+  saveSession(id: string, canvasId: string, editKey: string): void {
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL, edit_key TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "INSERT INTO sessions (id, canvas_id, edit_key) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET canvas_id = excluded.canvas_id, edit_key = excluded.edit_key",
+      id,
+      canvasId,
+      editKey,
+    );
+  }
+
+  loadSession(id: string): { canvasId: string; editKey: string } | null {
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL, edit_key TEXT NOT NULL)",
+    );
+    const row = this.ctx.storage.sql
+      .exec<{ canvas_id: string; edit_key: string }>("SELECT canvas_id, edit_key FROM sessions WHERE id = ?", id)
+      .toArray()[0];
+    return row === undefined ? null : { canvasId: row.canvas_id, editKey: row.edit_key };
+  }
+
   remove(id: string): boolean {
     return this.ctx.storage.sql.exec("DELETE FROM canvases WHERE id = ?", id).rowsWritten > 0;
   }
@@ -353,6 +375,64 @@ async function canvasIdForKey(env: Env, editKey: string): Promise<string | null>
   return registryStub(env).canvasForKey(await sha256(editKey));
 }
 
+async function mintCanvas(env: Env, origin: string, name = "canvas"): Promise<{
+  canvasId: string;
+  editKey: string;
+  sessionId: string;
+  viewUrl: string;
+  mcpUrl: string;
+}> {
+  const canvasId = newCanvasId();
+  const editKey = newEditKey();
+  const sessionId = `s${randomHex(16)}`;
+  canvasStub(env, canvasId).ensure(canvasId, name);
+  const registry = registryStub(env);
+  await registry.bind(await sha256(editKey), canvasId);
+  await registry.upsert({ id: canvasId, name, updatedAt: Date.now(), frameCount: 0 });
+  await registry.saveSession(sessionId, canvasId, editKey);
+  return {
+    canvasId,
+    editKey,
+    sessionId,
+    viewUrl: `${origin}/c/${canvasId}`,
+    mcpUrl: `${origin}/mcp/${editKey}`,
+  };
+}
+
+function withSession(response: Response, sessionId: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set("mcp-session-id", sessionId);
+  return new Response(response.body, { status: response.status, headers });
+}
+
+async function handleColdMcp(request: Request, env: Env, origin: string): Promise<Response> {
+  const header = request.headers.get("mcp-session-id");
+  if (header !== null && header !== "") {
+    const saved = await registryStub(env).loadSession(header);
+    if (saved === null) return textError(401, "unknown mcp session. connect to /mcp again to get a new anonymous canvas.");
+    const response = await handleMcp(
+      request,
+      canvasStub(env, saved.canvasId),
+      saved.canvasId,
+      `${origin}/c/${saved.canvasId}`,
+      `${origin}/mcp/${saved.editKey}`,
+    );
+    return withSession(response, header);
+  }
+  const minted = await mintCanvas(env, origin);
+  const response = await handleMcp(
+    request,
+    canvasStub(env, minted.canvasId),
+    minted.canvasId,
+    minted.viewUrl,
+    minted.mcpUrl,
+  );
+  return withSession(response, minted.sessionId);
+}
+  if (!EDIT_KEY_RE.test(editKey)) return null;
+  return registryStub(env).canvasForKey(await sha256(editKey));
+}
+
 function bearerKey(request: Request): string | null {
   const header = request.headers.get("authorization");
   if (header === null || !header.startsWith("Bearer ")) return null;
@@ -591,7 +671,11 @@ async function route(request: Request, env: Env): Promise<Response> {
     const canvasId = await canvasIdForKey(env, editKey);
     if (canvasId === null) return textError(401, "unknown edit key");
     const origin = url.origin;
-    return handleMcp(request, canvasStub(env, canvasId), canvasId, `${origin}/c/${canvasId}`);
+    return handleMcp(request, canvasStub(env, canvasId), canvasId, `${origin}/c/${canvasId}`, `${origin}/mcp/${editKey}`);
+  }
+
+  if (parts[0] === "mcp" && parts.length === 1) {
+    return handleColdMcp(request, env, url.origin);
   }
 
   if (parts[0] === "api" && parts[1] === "canvases" && parts.length === 2 && request.method === "POST") {
