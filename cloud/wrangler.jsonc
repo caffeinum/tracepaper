@@ -1,9 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tracepaper",
+  "name": "tracepaper-public",
   "main": "src/worker.ts",
   "compatibility_date": "2026-08-15",
   "workers_dev": true,
+  "preview_urls": false,
   "durable_objects": {
     "bindings": [
       { "name": "CANVAS", "class_name": "Canvas" },

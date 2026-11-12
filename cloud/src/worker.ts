@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { handleMcp } from "./mcp.ts";
 import { bearerMatches, parsePublish, parseSlug, PublishError, type PublishBody, type PublishFrame } from "./validate.ts";
 
 interface Env {
@@ -39,6 +40,27 @@ export class Registry extends DurableObject<Env> {
       row.updatedAt,
       row.frameCount,
     );
+  }
+
+  bind(keyHash: string, canvasId: string): void {
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS keys (key_hash TEXT PRIMARY KEY, canvas_id TEXT NOT NULL)",
+    );
+    this.ctx.storage.sql.exec(
+      "INSERT INTO keys (key_hash, canvas_id) VALUES (?, ?) ON CONFLICT(key_hash) DO UPDATE SET canvas_id = excluded.canvas_id",
+      keyHash,
+      canvasId,
+    );
+  }
+
+  canvasForKey(keyHash: string): string | null {
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS keys (key_hash TEXT PRIMARY KEY, canvas_id TEXT NOT NULL)",
+    );
+    const row = this.ctx.storage.sql
+      .exec<{ canvas_id: string }>("SELECT canvas_id FROM keys WHERE key_hash = ?", keyHash)
+      .toArray()[0];
+    return row === undefined ? null : row.canvas_id;
   }
 
   remove(id: string): boolean {
@@ -162,6 +184,38 @@ export class Canvas extends DurableObject<Env> {
     return { version, updatedAt: now };
   }
 
+  ensure(slug: string, name: string): void {
+    if (this.read() !== null) return;
+    this.ctx.storage.sql.exec(
+      "INSERT INTO meta (id, name, version, updated_at) VALUES (?, ?, 0, ?)",
+      slug,
+      name,
+      Date.now(),
+    );
+  }
+
+  upsertFrame(slug: string, frame: PublishFrame): { version: number } {
+    const saved = this.ctx.storage.transactionSync(() => {
+      this.ensure(slug, slug);
+      const current = this.ctx.storage.sql
+        .exec<{ version: number; name: string }>("SELECT version, name FROM meta WHERE id = ?", slug)
+        .toArray()[0];
+      const version = (current?.version ?? 0) + 1;
+      this.writeFrame(frame, version);
+      this.ctx.storage.sql.exec(
+        "INSERT INTO meta (id, name, version, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at",
+        slug,
+        current?.name ?? slug,
+        version,
+        Date.now(),
+      );
+      return version;
+    });
+    const message = JSON.stringify({ type: "updated", version: saved });
+    for (const socket of this.ctx.getWebSockets()) socket.send(message);
+    return { version: saved };
+  }
+
   private writeFrame(frame: PublishFrame, version: number): void {
     this.ctx.storage.sql.exec(
       `INSERT INTO frames (id, name, html, width, height, x, y, kind, font_size, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -231,6 +285,13 @@ export class Canvas extends DurableObject<Env> {
     return { html: row.html, version: row.version };
   }
 
+  htmlOf(frameId: string): string | null {
+    const row = this.ctx.storage.sql
+      .exec<{ html: string }>("SELECT html FROM frames WHERE id = ?", frameId)
+      .toArray()[0];
+    return row === undefined ? null : row.html;
+  }
+
   clear(): boolean {
     const had = this.read() !== null;
     this.ctx.storage.sql.exec("DELETE FROM frames");
@@ -262,14 +323,48 @@ function canvasStub(env: Env, slug: string): DurableObjectStub<Canvas> {
   return env.CANVAS.get(env.CANVAS.idFromName(slug));
 }
 
-function requirePublish(request: Request, env: Env): Response | null {
-  if (env.PUBLISH_TOKEN === undefined || env.PUBLISH_TOKEN === "") {
-    return textError(501, "PUBLISH_TOKEN is not set. writes are refused until wrangler secret put PUBLISH_TOKEN.");
-  }
-  if (!bearerMatches(request.headers.get("authorization"), env.PUBLISH_TOKEN)) {
-    return textError(401, "missing or wrong bearer token");
-  }
-  return null;
+function randomHex(bytes: number): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function newCanvasId(): string {
+  return `c${randomHex(8)}`;
+}
+
+function newEditKey(): string {
+  return `k${randomHex(16)}`;
+}
+
+function newFrameId(): string {
+  return `frm_${randomHex(6)}`;
+}
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const EDIT_KEY_RE = /^k[0-9a-f]{32}$/;
+
+async function canvasIdForKey(env: Env, editKey: string): Promise<string | null> {
+  if (!EDIT_KEY_RE.test(editKey)) return null;
+  return registryStub(env).canvasForKey(await sha256(editKey));
+}
+
+function bearerKey(request: Request): string | null {
+  const header = request.headers.get("authorization");
+  if (header === null || !header.startsWith("Bearer ")) return null;
+  return header.slice("Bearer ".length);
+}
+
+function publicUrls(request: Request, id: string, editKey: string): { url: string; mcp: string } {
+  const origin = new URL(request.url).origin;
+  return {
+    url: `${origin}/c/${id}`,
+    mcp: `${origin}/mcp/${editKey}`,
+  };
 }
 
 function viewerHtml(slug: string): string {
@@ -491,6 +586,36 @@ async function route(request: Request, env: Env): Promise<Response> {
     return json({ canvases: await registryStub(env).list() });
   }
 
+  if (parts[0] === "mcp" && parts.length === 2) {
+    const editKey = parts[1] ?? "";
+    const canvasId = await canvasIdForKey(env, editKey);
+    if (canvasId === null) return textError(401, "unknown edit key");
+    const origin = url.origin;
+    return handleMcp(request, canvasStub(env, canvasId), canvasId, `${origin}/c/${canvasId}`);
+  }
+
+  if (parts[0] === "api" && parts[1] === "canvases" && parts.length === 2 && request.method === "POST") {
+    const raw = await request.text();
+    let name = "canvas";
+    if (raw.trim() !== "") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return textError(400, "create body is not json");
+      }
+      if (parsed !== null && typeof parsed === "object" && "name" in parsed && typeof parsed.name === "string" && parsed.name.trim() !== "") {
+        name = parsed.name;
+      }
+    }
+    const id = newCanvasId();
+    const editKey = newEditKey();
+    canvasStub(env, id).ensure(id, name);
+    await registryStub(env).bind(await sha256(editKey), id);
+    await registryStub(env).upsert({ id, name, updatedAt: Date.now(), frameCount: 0 });
+    return json({ id, editKey, ...publicUrls(request, id, editKey) }, 201);
+  }
+
   if (parts[0] === "api" && parts[1] === "canvases" && parts.length === 3) {
     const slug = parseSlug(parts[2] ?? "");
     if (request.method === "GET") {
@@ -498,9 +623,11 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (canvas === null) return textError(404, `unknown canvas: ${slug}`);
       return json(canvas);
     }
-    if (request.method === "PUT") {
-      const denied = requirePublish(request, env);
-      if (denied !== null) return denied;
+    if (request.method === "POST" || request.method === "PUT") {
+      const editKey = bearerKey(request);
+      if (editKey === null) return textError(401, "missing edit key");
+      const owner = await canvasIdForKey(env, editKey);
+      if (owner !== slug) return textError(401, "edit key does not own this canvas");
       const body = parsePublish(await request.text());
       const saved = await canvasStub(env, slug).snapshot(slug, body);
       await registryStub(env).upsert({
@@ -509,11 +636,13 @@ async function route(request: Request, env: Env): Promise<Response> {
         updatedAt: saved.updatedAt,
         frameCount: body.frames.length,
       });
-      return json({ id: slug, name: body.name, version: saved.version, frames: body.frames.length });
+      return json({ id: slug, name: body.name, version: saved.version, frames: body.frames.length, ...publicUrls(request, slug, editKey) });
     }
     if (request.method === "DELETE") {
-      const denied = requirePublish(request, env);
-      if (denied !== null) return denied;
+      const editKey = bearerKey(request);
+      if (editKey === null) return textError(401, "missing edit key");
+      const owner = await canvasIdForKey(env, editKey);
+      if (owner !== slug) return textError(401, "edit key does not own this canvas");
       const had = await canvasStub(env, slug).clear();
       await registryStub(env).remove(slug);
       if (!had) return textError(404, `unknown canvas: ${slug}`);
