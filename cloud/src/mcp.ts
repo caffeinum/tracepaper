@@ -44,8 +44,25 @@ const TOOLS = [
     },
   },
   {
+    name: "publish",
+    description: "Put HTML on this canvas and return the public view link. Omit frameId to add a frame. The link cannot edit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        html: { type: "string" },
+        name: { type: "string" },
+        frameId: { type: "string" },
+        width: { type: "number" },
+        height: { type: "number" },
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+      required: ["html"],
+    },
+  },
+  {
     name: "share",
-    description: "The public view link. It cannot edit.",
+    description: "Put HTML on this canvas and return the public view link. The link cannot edit.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
@@ -62,7 +79,16 @@ function toolText(text: string): { content: Array<{ type: "text"; text: string }
   return { content: [{ type: "text", text }] };
 }
 
-export async function handleMcp(request: Request, canvas: McpCanvas, canvasId: string, viewUrl: string): Promise<Response> {
+export async function handleMcp(
+  request: Request,
+  canvas: McpCanvas,
+  canvasId: string,
+  viewUrl: string,
+  mcpUrl: string,
+): Promise<Response> {
+  if (request.method === "GET") {
+    return Response.json({ ok: true, mcp: "POST json-rpc to this url" });
+  }
   if (request.method !== "POST") {
     return Response.json({ error: "mcp expects POST" }, { status: 405 });
   }
@@ -73,6 +99,12 @@ export async function handleMcp(request: Request, canvas: McpCanvas, canvasId: s
       protocolVersion: "2024-11-05",
       capabilities: { tools: {} },
       serverInfo: { name: "tracepaper", version: "0.1.0" },
+      instructions: [
+        "Anonymous canvas. No login.",
+        `Public view link, cannot edit: ${viewUrl}`,
+        `To keep this canvas, reconnect at ${mcpUrl}`,
+        "Call publish with html to put a frame on the canvas and get the public link.",
+      ].join("\n"),
     });
   }
   if (body.method === "notifications/initialized" || body.method === "ping") {
@@ -89,7 +121,7 @@ export async function handleMcp(request: Request, canvas: McpCanvas, canvasId: s
   if (name === "list_frames") {
     return rpc(id, toolText(JSON.stringify({ canvasUrl: viewUrl, frames: current.frames })));
   }
-  if (name === "share") {
+  if (name === "share" || name === "publish" && args.html === undefined) {
     return rpc(id, toolText(viewUrl));
   }
   if (name === "get_frame") {
@@ -100,7 +132,7 @@ export async function handleMcp(request: Request, canvas: McpCanvas, canvasId: s
     const meta = current.frames.find((frame) => frame.id === frameId);
     return rpc(id, toolText(JSON.stringify({ ...meta, html })));
   }
-  if (name === "push_html") {
+  if (name === "push_html" || name === "publish") {
     if (typeof args.html !== "string" || args.html.length === 0) return rpcError(id, "html is required");
     const frameId = typeof args.frameId === "string" ? args.frameId : `frm_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
     if (!/^frm_[0-9a-f]{12}$/.test(frameId)) return rpcError(id, `bad frame id: ${frameId}`);
@@ -120,7 +152,7 @@ export async function handleMcp(request: Request, canvas: McpCanvas, canvasId: s
       kind: "html",
       fontSize: null,
     });
-    return rpc(id, toolText(JSON.stringify({ id: frameId, version: saved.version, canvasUrl: viewUrl })));
+    return rpc(id, toolText(JSON.stringify({ id: frameId, version: saved.version, canvasUrl: viewUrl, mcpUrl })));
   }
   return rpcError(id, `unknown tool: ${name ?? ""}`);
 }
