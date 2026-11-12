@@ -115,7 +115,7 @@ export async function handleMcp(
 
   const name = body.params?.name;
   const args = body.params?.arguments ?? {};
-  const current = canvas.read();
+  const current = await canvas.read();
   if (current === null) return rpcError(id, `unknown canvas: ${canvasId}`);
 
   if (name === "list_frames") {
@@ -127,7 +127,7 @@ export async function handleMcp(
   if (name === "get_frame") {
     const frameId = args.frameId;
     if (typeof frameId !== "string") return rpcError(id, "frameId is required");
-    const html = canvas.htmlOf(frameId);
+    const html = await canvas.htmlOf(frameId);
     if (html === null) return rpcError(id, `unknown frame: ${frameId}`);
     const meta = current.frames.find((frame) => frame.id === frameId);
     return rpc(id, toolText(JSON.stringify({ ...meta, html })));
@@ -141,7 +141,7 @@ export async function handleMcp(
     const height = typeof args.height === "number" ? args.height : existing?.height ?? 900;
     const x = typeof args.x === "number" ? args.x : existing?.x ?? current.frames.length * 80;
     const y = typeof args.y === "number" ? args.y : existing?.y ?? 0;
-    const saved = canvas.upsertFrame(canvasId, {
+    const saved = await canvas.upsertFrame(canvasId, {
       id: frameId,
       name: typeof args.name === "string" ? args.name : existing?.name ?? "Frame",
       html: args.html,

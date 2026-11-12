@@ -385,7 +385,7 @@ async function mintCanvas(env: Env, origin: string, name = "canvas"): Promise<{
   const canvasId = newCanvasId();
   const editKey = newEditKey();
   const sessionId = `s${randomHex(16)}`;
-  canvasStub(env, canvasId).ensure(canvasId, name);
+  await canvasStub(env, canvasId).ensure(canvasId, name);
   const registry = registryStub(env);
   await registry.bind(await sha256(editKey), canvasId);
   await registry.upsert({ id: canvasId, name, updatedAt: Date.now(), frameCount: 0 });
@@ -691,7 +691,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
     const id = newCanvasId();
     const editKey = newEditKey();
-    canvasStub(env, id).ensure(id, name);
+    await canvasStub(env, id).ensure(id, name);
     await registryStub(env).bind(await sha256(editKey), id);
     await registryStub(env).upsert({ id, name, updatedAt: Date.now(), frameCount: 0 });
     return json({ id, editKey, ...publicUrls(request, id, editKey) }, 201);
