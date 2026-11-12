@@ -282,7 +282,7 @@ function viewerHtml(slug: string): string {
   html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f1ea; color: #1c1915; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
   #stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; background-color: #f4f1ea; background-image: linear-gradient(90deg, #e4ddd2 1px, transparent 1px), linear-gradient(#e4ddd2 1px, transparent 1px); }
   #stage.is-panning { cursor: grabbing; }
-  #bar { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; background: #f4f1eacc; border-radius: 8px; }
+  #bar { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; background: #f4f1eacc; border-radius: 8px; pointer-events: none; }
   #world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
   .frame { position: absolute; background: white; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
   iframe { border: 0; width: 100%; height: 100%; background: white; pointer-events: none; }
@@ -324,15 +324,17 @@ function fit() {
     maxX = Math.max(maxX, frame.x + frame.width);
     maxY = Math.max(maxY, frame.y + frame.height);
   }
-  const pad = 80;
+  const pad = 48;
+  const bar = 56;
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
   const scale = Math.min(
-    (stage.clientWidth - pad * 2) / Math.max(1, maxX - minX),
-    (stage.clientHeight - pad * 2) / Math.max(1, maxY - minY),
-    1,
+    (stage.clientWidth - pad * 2) / spanX,
+    (stage.clientHeight - pad * 2 - bar) / spanY,
   );
-  view.scale = Math.max(0.08, scale);
-  view.x = stage.clientWidth / 2 - ((minX + maxX) / 2) * view.scale;
-  view.y = stage.clientHeight / 2 - ((minY + maxY) / 2) * view.scale;
+  view.scale = scale;
+  view.x = pad + ((stage.clientWidth - pad * 2) - spanX * scale) / 2 - minX * scale;
+  view.y = bar + pad + ((stage.clientHeight - bar - pad * 2) - spanY * scale) / 2 - minY * scale;
   paint();
 }
 
@@ -371,7 +373,7 @@ function place(canvas) {
 stage.addEventListener("wheel", (event) => {
   event.preventDefault();
   if (event.ctrlKey || event.metaKey) {
-    const next = Math.min(2.5, Math.max(0.08, view.scale * Math.exp(-event.deltaY * 0.01)));
+    const next = Math.min(2.5, Math.max(0.02, view.scale * Math.exp(-event.deltaY * 0.002)));
     const rect = stage.getBoundingClientRect();
     const ax = event.clientX - rect.left;
     const ay = event.clientY - rect.top;
