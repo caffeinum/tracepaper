@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bus, type BusEvent } from "../src/events.ts";
 import { startHttpServer, type HttpServer } from "../src/http.ts";
-import { findChrome, PNG_MAGIC } from "../src/screenshot.ts";
+import { findChrome, findWebkit, PNG_MAGIC } from "../src/screenshot.ts";
 import { Store } from "../src/store.ts";
 import type { Comment, Frame, FrameSummary } from "../src/types.ts";
 
@@ -295,15 +295,17 @@ describe("GET /f/:id.png", () => {
   });
 
   const chrome = findChrome();
+  const webkit = findWebkit();
 
-  // CI has no Chrome; guard the render so the suite never depends on a browser being installed.
-  if (chrome === null) {
-    test("without a Chrome install, the endpoint is a loud 501", async () => {
+  // CI has neither renderer; guard the render so the suite never depends on one being installed.
+  if (webkit === null && chrome === null) {
+    test("without a renderer, the endpoint is a loud 501", async () => {
       const frame = await createFrame("<h1>shot</h1>", "Shot Me");
       const res = await fetch(`${base}/f/${frame.id}.png`);
       expect(res.status).toBe(501);
       const { error } = (await res.json()) as { error: string };
       expect(error).toContain("TRACEPAPER_CHROME");
+      expect(error).toContain("TRACEPAPER_WEBKIT");
     });
   } else {
     test(

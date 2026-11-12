@@ -584,19 +584,14 @@ code {
   background: var(--ground);
 }
 
-/* Blueprint hairline grid: fine cells plus a stronger line every fourth. Both scales and their
-   positions are driven from canvas.ts (applyView) so the paper stays registered to the world under
-   pan and zoom. Layer order matches the four background-size / -position values set there:
-   minor-V, minor-H, major-V, major-H. */
+/* One hairline grid. A second, heavier grid every fourth cell read as a double grid. */
 .viewport {
   position: absolute;
   inset: 0;
   touch-action: none;
   background-image:
     linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-    linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
-    linear-gradient(var(--grid-major) 1px, transparent 1px);
+    linear-gradient(var(--grid) 1px, transparent 1px);
   background-repeat: repeat;
   cursor: default;
 }
@@ -619,6 +614,26 @@ code {
 .stage[data-cursor="grabbing"] .viewport,
 .stage[data-cursor="grabbing"] .frame-catch {
   cursor: grabbing;
+}
+
+/* Cmd held: the next drag moves a frame, not the board. The iframe must not eat the press. */
+.stage[data-cursor="move"],
+.stage[data-cursor="move"] .viewport,
+.stage[data-cursor="move"] .frame,
+.stage[data-cursor="move"] .frame-catch,
+.stage[data-cursor="move"] .frame-label,
+.stage[data-cursor="move"] .frame-name,
+.stage[data-cursor="move"] .frame-name.is-handle {
+  cursor: move;
+}
+
+.stage[data-cursor="move"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.stage[data-cursor="move"] .frame iframe {
+  pointer-events: none;
 }
 
 /* A teardrop pin cursor — the same shape as the pins it drops — so comment mode is legible without
@@ -820,6 +835,23 @@ code {
 
 .frame.is-interactive .frame-body {
   box-shadow: var(--shadow-2);
+}
+
+/* Fit-zoom: 40 wobbly clips and shadows are what makes pan feel stuck. A plain edge is enough there. */
+.world.is-far .frame-sketch,
+.world.is-far .frame-sketch-fill {
+  display: none;
+}
+
+.world.is-far .frame-thumb,
+.world.is-far .frame iframe {
+  clip-path: none !important;
+  border-radius: 2px;
+}
+
+.world.is-far .frame-body {
+  box-shadow: none;
+  background: var(--sketch-paper);
 }
 
 /* Hand-drawn frame outline. The fill pass sits behind the iframe (paper backing, no stroke); the

@@ -82,6 +82,29 @@ describe("tracepaper cli", () => {
     expect(out.trim()).toBe("<p>body</p>");
   });
 
+  test("push --frame keeps the name and honours --x/--y; move does the same without html", async () => {
+    await cli("push", frameFile("<p>v1</p>"), "--name", "Keep me", "--json");
+    const { frame } = JSON.parse(out) as { frame: { id: string; name: string; x: number; y: number } };
+    expect(frame.name).toBe("Keep me");
+
+    out = "";
+    const updated = frameFile("<section><section>nested</section></section>");
+    expect(await cli("push", updated, "--frame", frame.id, "--x", "40", "--y", "70", "--json")).toBe(0);
+    const next = JSON.parse(out) as { frame: { name: string; x: number; y: number; html: string; version: number } };
+    expect(next.frame.name).toBe("Keep me");
+    expect(next.frame.x).toBe(40);
+    expect(next.frame.y).toBe(70);
+    expect(next.frame.html).toContain("</section></section>");
+    expect(next.frame.version).toBe(2);
+
+    out = "";
+    expect(await cli("move", frame.id, "9", "8", "--json")).toBe(0);
+    const moved = JSON.parse(out) as { frame: { x: number; y: number; html: string } };
+    expect(moved.frame.x).toBe(9);
+    expect(moved.frame.y).toBe(8);
+    expect(moved.frame.html).toBe(next.frame.html);
+  });
+
   test("comments → reply → resolve threads and cascades", async () => {
     // Seed a frame, then a human comment written straight to the same db.
     await cli("push", frameFile("<h1>x</h1>"), "--name", "f", "--json");

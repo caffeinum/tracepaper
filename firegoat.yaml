@@ -1,10 +1,8 @@
 # firegoat.yaml: evals for how well coding agents use tracepaper.
-# Run: npx -y firegoat@latest eval   (needs bun and sqlite3 on PATH; no credentials)
+# Run: npx -y firegoat@latest eval   (needs bun, curl and sqlite3 on PATH; no credentials)
 #
 # Every run has its own HOME, so ~/.tracepaper (db, server.json, pid) is per run and the
-# real canvas on :4321 is never touched. Each workdir gets its own `git init`, because the
-# runs live inside this repo: without it, npx resolves the repo's own bin and git shows
-# tracepaper's history.
+# real canvas on :4321 is never touched. Each workdir gets a `git init`, like a real project.
 
 runs: 1
 
@@ -20,6 +18,7 @@ tests:
   # zero-start: an ordinary landing-page project, nothing installed, no product name.
   # Does the agent find tracepaper cold and get a reviewable canvas up hands-off?
   - name: zero-start
+    env_passthrough: [PATH]
     install: cp -R "$FIREGOAT_OUT/landing/." .
     prompt: >-
       I'm iterating on this landing page's hero with you and reading screenshots in
@@ -35,17 +34,12 @@ tests:
       canvas/comment app does not count.
     checks:
       - run: >-
-          grep -Eq '^\[[0-9]+\] (\$ .*(github:caffeinum/tracepaper|(npx|bunx|bun x|/|^\[[0-9]+\] \$ )tracepaper( |@)|tracepaper (push|up|serve|list|status))|mcp__tracepaper__)' "$FIREGOAT_TRANSCRIPT"
+          grep -Eq '^\[[0-9]+\] (\$ .*(github:caffeinum/tracepaper|(npx|bunx|bun x|/) *tracepaper( |@)|tracepaper (push|up|serve|list|status))|mcp__tracepaper__)' "$FIREGOAT_TRANSCRIPT"
       - run: >-
           db="$FIREGOAT_HOME/.tracepaper/tracepaper.db"; test -f "$db" &&
           test "$(sqlite3 "$db" "select count(*) from frames where kind='html'")" -ge 3
-      - run: >-
-          grep -Eq '^agent: .*https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_TRANSCRIPT"
-      - run: |
-          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
-          # one && chain: a `!` line on its own would not fail the check
-          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
+      - run: grep -Eq 'https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_ANSWER"
+      - run: test -s "$FIREGOAT_TRANSCRIPT" && ! grep -qF "$FIREGOAT_REPO" "$FIREGOAT_TRANSCRIPT"
     timeout: 900
 
   # configured: the local build is installed, nothing wired up. Does the agent notice it
@@ -67,24 +61,21 @@ tests:
       - run: >-
           db="$FIREGOAT_HOME/.tracepaper/tracepaper.db"; test -f "$db" &&
           test "$(sqlite3 "$db" "select count(*) from frames where kind='html'")" -ge 2
-      - run: >-
-          grep -Eq '^agent: .*https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_TRANSCRIPT"
+      - run: grep -Eq 'https?://(127\.0\.0\.1|localhost):[0-9]+' "$FIREGOAT_ANSWER"
       - run: >-
           test -s "$FIREGOAT_TRANSCRIPT" &&
           ! grep -Eq '^\[[0-9]+\] \$ .*((npm (install|i|add)|pnpm (add|dlx)|bun add) .*tracepaper|(npx|bunx|yarn dlx) .*(tracepaper@|github:caffeinum/tracepaper))' "$FIREGOAT_TRANSCRIPT"
-      - run: |
-          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
-          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
+      - run: test -s "$FIREGOAT_TRANSCRIPT" && ! grep -qF "$FIREGOAT_REPO" "$FIREGOAT_TRANSCRIPT"
     timeout: 900
 
-  # configured: MCP connected, the human already pinned two notes on a pricing mockup.
+  # configured: MCP connected, the human already pinned two notes on a pricing mockup
+  # (seeded with `tracepaper push` and the canvas's own comment api).
   # Does the agent read them, edit the frame in place, and answer in each thread?
   - name: address-feedback
     install:
       - npm init -y >/dev/null && npm install "$FIREGOAT_OUT"/tracepaper-*.tgz >/dev/null
-      - mkdir -p .canvas && bun "$FIREGOAT_OUT/seed-feedback.ts" .canvas/tracepaper.db "$FIREGOAT_OUT/pricing.html" evals >/dev/null
-    harness_args: [--mcp-config, $FIREGOAT_OUT/mcp.json]
+      - sh "$FIREGOAT_OUT/seed-feedback.sh" .canvas/tracepaper.db "$FIREGOAT_OUT/pricing.html" >/dev/null
+    claude_args: [--mcp-config, $FIREGOAT_OUT/mcp.json]
     prompt: >-
       I left a couple of notes on the pricing page mockup. Go through them, make the
       changes, and tell me in each note's thread when it's done. Keep it minimal.
@@ -104,8 +95,5 @@ tests:
           test "$(sqlite3 "$FIREGOAT_WORKDIR/.canvas/tracepaper.db" "select count(*) from frames where kind='html'")" -eq 1
       - run: >-
           test "$(sqlite3 "$FIREGOAT_WORKDIR/.canvas/tracepaper.db" "select count(*) from comments c where c.author='human' and c.parentId is null and (c.resolved=1 or exists (select 1 from comments r where r.parentId=c.id and r.author='agent'))")" -eq 2
-      - run: |
-          R="${FIREGOAT_WORKDIR%%/.firegoat/*}"
-          test -s "$FIREGOAT_TRANSCRIPT" && ! grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -q '\.\./\.\./' &&
-            ! (grep -E '^\[[0-9]+\] ' "$FIREGOAT_TRANSCRIPT" | grep -o "$R/[^\" ]*" | grep -vF -e "$FIREGOAT_WORKDIR" -e "$FIREGOAT_OUT" -e "$FIREGOAT_HOME" -e "$R/.firegoat/.claude/" | grep -q .)
+      - run: test -s "$FIREGOAT_TRANSCRIPT" && ! grep -qF "$FIREGOAT_REPO" "$FIREGOAT_TRANSCRIPT"
     timeout: 900

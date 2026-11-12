@@ -99,8 +99,11 @@ function readSource(flags: Flags): string {
   return readFileSync(path, "utf8");
 }
 
-function nameFor(flags: Flags): string | undefined {
+function nameFor(flags: Flags, updating: boolean): string | undefined {
   if (typeof flags["name"] === "string") return flags["name"];
+  // A file path is a default name for a new frame only. On update it would rename
+  // the frame to the file, which is never what the caller asked for.
+  if (updating) return undefined;
   const path = flags._[0];
   if (path === undefined || path === "-") return undefined;
   return basename(path, extname(path));
@@ -143,16 +146,18 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
       case "push": {
         const html = readSource(flags);
         const frameId = typeof flags["frame"] === "string" ? flags["frame"] : undefined;
-        const name = nameFor(flags);
+        const updating = frameId !== undefined;
+        const name = nameFor(flags, updating);
         const width = num(flags, "width");
         const height = num(flags, "height");
+        const x = num(flags, "x");
+        const y = num(flags, "y");
         // createdBy is always the writer's own repo, even when --repo targets another canvas.
         const own = ownRepo();
         const repo = typeof flags["repo"] === "string" ? flags["repo"] : own;
-        const frame =
-          frameId === undefined
-            ? store.createFrame({ html, name, width, height, x: num(flags, "x"), y: num(flags, "y"), repo, createdBy: own })
-            : store.updateFrameHtml(frameId, html, { name, width, height });
+        const frame = updating
+          ? store.updateFrameHtml(frameId, html, { name, width, height, x, y })
+          : store.createFrame({ html, name, width, height, x, y, repo, createdBy: own });
         const canvas = await liveCanvasUrl(config);
         if (json) {
           out(JSON.stringify({ frame, ...canvasFields(canvas) }, null, 2));
@@ -271,6 +276,18 @@ export async function runCli(verb: string, rest: string[]): Promise<number> {
         return 0;
       }
 
+      case "move": {
+        const frameId = flags._[0];
+        const x = flags._[1] === undefined ? num(flags, "x") : Number(flags._[1]);
+        const y = flags._[2] === undefined ? num(flags, "y") : Number(flags._[2]);
+        if (frameId === undefined || x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
+          throw new Error("usage: tracepaper move <frameId> <x> <y>");
+        }
+        const frame = store.moveFrame(frameId, x, y);
+        out(json ? JSON.stringify({ frame }, null, 2) : `moved ${frame.id} to (${frame.x}, ${frame.y})`);
+        return 0;
+      }
+
       case "tidy": {
         const frames = store.tidyFrames(repoFlag(flags));
         out(json ? JSON.stringify({ frames }, null, 2) : `re-packed ${frames.length} frame(s).`);
@@ -314,9 +331,10 @@ function printHelp(): void {
       "CLI (for agents without MCP — writes go straight to the shared db as the agent):",
       "  tracepaper push <file>           draw a frame from an HTML file (`-` for stdin, or --html <str>)",
       "      --name --width --height --x --y   frame metadata; omit x/y to auto-place",
-      "      --frame <id>                 update an existing frame instead of creating one",
+      "      --frame <id>                 update in place. --x/--y move it. name stays unless --name is passed",
       "      --repo <x>                   which repo/canvas to draw on (default: git remote / cwd)",
-      "  tracepaper list                  list frames, sizes, positions, open-comment counts (--repo <x>)",
+      "  tracepaper move <id> <x> <y>     move a frame. html and comments stay",
+      "  tracepaper list                  list frames (--repo <x>). --json is {\"frames\":[...]}, not a bare array",
       "  tracepaper get <frameId>         print a frame's current HTML",
       "  tracepaper comments              read human feedback (--since <cursor> --frame <id> --resolved --repo <x>)",
       "  tracepaper reply <id> <text…>    reply to a comment thread",

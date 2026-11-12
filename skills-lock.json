@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "firegoat-onboarding": {
+      "source": "firegoat-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/firegoat-onboarding/SKILL.md",
+      "computedHash": "42e1e8ebdf588e1521cc35d8677fc55c09739aee267bd0d2b28fcd3fae3466b3"
+    }
+  }
+}

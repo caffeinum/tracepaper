@@ -297,6 +297,8 @@ let tool: Tool = "select";
 let interactiveFrameId: string | null = null;
 let selectedFrameId: string | null = null;
 let spaceHeld = false;
+let cmdHeld = false;
+let frameDragging = false;
 let hasFitted = false;
 /**
  * The canvas currently in view. The view is always exactly one canvas — there is no "all canvases"
@@ -378,23 +380,35 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
+let viewPaint = 0;
+let lastDetailScale = -1;
+
 function applyView(): void {
+  if (viewPaint !== 0) return;
+  viewPaint = requestAnimationFrame(paintView);
+}
+
+function paintView(): void {
+  viewPaint = 0;
   world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   world.style.setProperty("--inv", String(1 / view.scale));
+  // The wobbly clip and drop shadow are invisible at fit-zoom and expensive across dozens of frames.
+  world.classList.toggle("is-far", view.scale < 0.35);
 
   let cell = GRID * view.scale;
   while (cell < 14) cell *= 4;
   while (cell > 96) cell /= 4;
-  const major = cell * 4;
-  // Four blueprint layers (minor-V, minor-H, major-V, major-H) share one origin so the grid stays
-  // registered to the world under pan and zoom.
-  const origin = `${view.x}px ${view.y}px`;
-  viewport.style.backgroundSize = `${cell}px ${cell}px, ${cell}px ${cell}px, ${major}px ${major}px, ${major}px ${major}px`;
-  viewport.style.backgroundPosition = `${origin}, ${origin}, ${origin}, ${origin}`;
+  // Integer origin. A fractional background-position paints each 1px line twice.
+  const origin = `${Math.round(view.x)}px ${Math.round(view.y)}px`;
+  viewport.style.backgroundSize = `${cell}px ${cell}px, ${cell}px ${cell}px`;
+  viewport.style.backgroundPosition = `${origin}, ${origin}`;
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
-  positionPanel();
-  updateFrameDetail();
+  if (panel) positionPanel();
+  if (lastDetailScale < 0 || Math.abs(view.scale - lastDetailScale) / Math.max(lastDetailScale, 0.01) > 0.08) {
+    lastDetailScale = view.scale;
+    updateFrameDetail();
+  }
 }
 
 /** Zoom about a stage-space anchor so the world point under it stays put. */
@@ -1013,70 +1027,74 @@ function updateFrameDetail(): void {
 }
 
 /**
+ * Move a frame. Applied to the DOM as you drag, written once on release.
+ * A stationary press stays a click, so double-click-to-interact still works.
+ */
+function beginFrameDrag(frameId: string, event: PointerEvent): void {
+  const frame = frames.get(frameId);
+  if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
+  const node = frameNodes.get(frameId);
+  if (!node) throw new Error(`drag started on a frame with no node: ${frameId}`);
+  setSelected(frameId);
+
+  const startScreen = { x: event.clientX, y: event.clientY };
+  const startWorld = screenToWorld(stagePoint(event));
+  const origin = { x: frame.x, y: frame.y };
+  let next = origin;
+  let dragging = false;
+
+  const onMove = (move: PointerEvent): void => {
+    if (move.pointerId !== event.pointerId) return;
+    if (!dragging) {
+      if (Math.hypot(move.clientX - startScreen.x, move.clientY - startScreen.y) < 4) return;
+      dragging = true;
+      frameDragging = true;
+      updateCursor();
+    }
+    const world = screenToWorld(stagePoint(move));
+    next = {
+      x: Math.round(origin.x + (world.x - startWorld.x)),
+      y: Math.round(origin.y + (world.y - startWorld.y)),
+    };
+    node.root.style.transform = `translate(${next.x}px, ${next.y}px)`;
+  };
+
+  const onUp = (up: PointerEvent): void => {
+    if (up.pointerId !== event.pointerId) return;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    frameDragging = false;
+    updateCursor();
+    if (!dragging) return;
+
+    putFrame({ ...frame, x: next.x, y: next.y });
+    renderAll();
+    patchJson(`/api/frames/${frameId}`, next).catch((error: unknown) => {
+      putFrame({ ...frame, x: origin.x, y: origin.y });
+      renderAll();
+      fail(error instanceof Error ? error : new Error(String(error)));
+    });
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+}
+
+/**
  * Drag a frame's title to move the frame. The title is the handle rather than the frame body
  * because the body is an iframe the human may want to click into — and because the label is
  * the one part of a frame that is unambiguously chrome.
- *
- * The move is applied to the DOM as you drag and written once on release, so a drag is one
- * request rather than one per pointer event.
+ * Cmd+drag moves the frame from anywhere; that path is on the stage, not this handle.
  */
 function makeDraggable(handle: HTMLElement, frameId: string): void {
   handle.classList.add("is-handle");
   handle.addEventListener("pointerdown", (event) => {
-    // Dragging a title moves the frame only with the select tool; otherwise let the press fall
-    // through to the stage so the pan/hand tool (or held space) pans instead.
-    if (event.button !== 0 || tool !== "select" || spaceHeld) return;
-    const frame = frames.get(frameId);
-    if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
-    // Stop the stage from arming a pan, but do NOT preventDefault or capture yet. Both suppress
-    // the click/dblclick that follows a stationary press — which is why a double-click on the
-    // title selected the frame and never entered interactive mode.
+    if (event.button !== 0 || spaceHeld || event.metaKey) return;
+    if (tool !== "select") return;
     event.stopPropagation();
-
-    const node = frameNodes.get(frameId);
-    if (!node) throw new Error(`drag started on a frame with no node: ${frameId}`);
-    setSelected(frameId);
-
-    const startScreen = { x: event.clientX, y: event.clientY };
-    const startWorld = screenToWorld(stagePoint(event));
-    const origin = { x: frame.x, y: frame.y };
-    let next = origin;
-    let dragging = false;
-
-    const onMove = (move: PointerEvent): void => {
-      if (!dragging) {
-        if (Math.hypot(move.clientX - startScreen.x, move.clientY - startScreen.y) < 4) return;
-        dragging = true;
-        handle.setPointerCapture(move.pointerId);
-      }
-      const world = screenToWorld(stagePoint(move));
-      next = {
-        x: Math.round(origin.x + (world.x - startWorld.x)),
-        y: Math.round(origin.y + (world.y - startWorld.y)),
-      };
-      node.root.style.transform = `translate(${next.x}px, ${next.y}px)`;
-    };
-
-    const onUp = (): void => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      if (!dragging) return;
-
-      // Optimistic locally, then persisted; a failure snaps back rather than lying.
-      putFrame({ ...frame, x: next.x, y: next.y });
-      renderAll();
-      patchJson(`/api/frames/${frameId}`, next).catch((error: unknown) => {
-        putFrame({ ...frame, x: origin.x, y: origin.y });
-        renderAll();
-        fail(error instanceof Error ? error : new Error(String(error)));
-      });
-    };
-
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
+    beginFrameDrag(frameId, event);
   });
 }
 
@@ -1811,10 +1829,14 @@ repoSwitcher.addEventListener("change", () => {
 });
 
 function updateCursor(): void {
-  // Space (or the pan tool) means a hand; a live drag shows the closed hand. Otherwise the tool
-  // decides: comment shows the pin, select shows the default arrow.
-  if (spaceHeld || tool === "pan") {
+  // Space always pans the board, even over a frame, so the hand wins over cmd.
+  // Cmd means the next drag moves a frame, so the cursor says so.
+  if (spaceHeld || (tool === "pan" && !cmdHeld)) {
     stage.dataset["cursor"] = panning ? "grabbing" : "grab";
+    return;
+  }
+  if (cmdHeld) {
+    stage.dataset["cursor"] = frameDragging ? "grabbing" : "move";
     return;
   }
   if (panning) {
@@ -1849,6 +1871,18 @@ stage.addEventListener("pointerdown", (event) => {
   const middle = event.button === 1;
   const left = event.button === 0;
   if (!middle && !left) return;
+  // Cmd+drag moves the frame, from anywhere on it, whatever the tool. Space still pans.
+  if (left && onFrame && event.metaKey && !spaceHeld) {
+    const chrome =
+      target instanceof Element &&
+      target.closest(".pin, .frame-kill, .frame-save, .frame-publish, .frame-hint, .copy-id, .frame-drop") !==
+        null;
+    const id = frameEl.dataset["frameId"];
+    if (!chrome && id !== undefined) {
+      beginFrameDrag(id, event);
+      return;
+    }
+  }
   // The pan tool and held space pan over anything, including frames. Otherwise a left press on a
   // frame belongs to that frame: select double-click enters it, comment drops a pin. Arming a pan
   // here captures the pointer on a few px of jitter and swallows the dblclick — the frame ends up
@@ -2143,6 +2177,12 @@ window.addEventListener("keydown", (event) => {
       updateCursor();
     }
   }
+  if (event.key === "Meta") {
+    if (!cmdHeld) {
+      cmdHeld = true;
+      updateCursor();
+    }
+  }
 });
 
 window.addEventListener("keyup", (event) => {
@@ -2150,10 +2190,21 @@ window.addEventListener("keyup", (event) => {
     spaceHeld = false;
     updateCursor();
   }
+  if (event.key === "Meta") {
+    cmdHeld = false;
+    updateCursor();
+  }
 });
 
 window.addEventListener("blur", () => {
   spaceHeld = false;
+  cmdHeld = false;
+  updateCursor();
+});
+
+window.addEventListener("pointermove", (event) => {
+  if (event.metaKey === cmdHeld) return;
+  cmdHeld = event.metaKey;
   updateCursor();
 });
 
@@ -2341,7 +2392,7 @@ function listenForFrameEscape(): void {
     const data = event.data;
     if (!isRecord(data)) return;
     const kind = data["__tracepaper"];
-    if (kind !== "escape" && kind !== "scroll" && kind !== "zoom") return;
+    if (kind !== "escape" && kind !== "scroll" && kind !== "zoom" && kind !== "meta") return;
 
     // Identity by source window, same as escape: the frame's origin is the opaque string "null",
     // so event.origin is useless; matching event.source against an iframe we created is the only
@@ -2351,6 +2402,12 @@ function listenForFrameEscape(): void {
 
     if (kind === "escape") {
       if (interactiveFrameId === id) setInteractive(null);
+      return;
+    }
+
+    if (kind === "meta") {
+      cmdHeld = data["down"] === true;
+      updateCursor();
       return;
     }
 

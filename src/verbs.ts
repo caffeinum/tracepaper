@@ -10,6 +10,7 @@ export const CLI_VERBS = new Set([
   "resolve",
   "list",
   "get",
+  "move",
   "tidy",
   "delete",
   "share",
