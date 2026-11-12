@@ -429,9 +429,6 @@ async function handleColdMcp(request: Request, env: Env, origin: string): Promis
   );
   return withSession(response, minted.sessionId);
 }
-  if (!EDIT_KEY_RE.test(editKey)) return null;
-  return registryStub(env).canvasForKey(await sha256(editKey));
-}
 
 function bearerKey(request: Request): string | null {
   const header = request.headers.get("authorization");
