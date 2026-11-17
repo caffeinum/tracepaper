@@ -30,6 +30,12 @@ describe("service plist", () => {
     expect(xml).toMatch(/<key>TRACEPAPER_STRICT_PORT<\/key>\s*<string>1<\/string>/);
     expect(xml).toMatch(/<key>TRACEPAPER_PORT<\/key>\s*<string>4321<\/string>/);
     expect(xml).toMatch(/<key>TRACEPAPER_DB<\/key>\s*<string>\/Users\/x\/.paper-mcp\/paper.db<\/string>/);
+    expect(xml).not.toContain("TRACEPAPER_HOST");
+  });
+
+  test("a non-loopback host is written so launchd binds it", () => {
+    const xml = buildPlist({ ...base, host: "0.0.0.0" });
+    expect(xml).toMatch(/<key>TRACEPAPER_HOST<\/key>\s*<string>0.0.0.0<\/string>/);
   });
 
   test("escapes XML in paths", () => {

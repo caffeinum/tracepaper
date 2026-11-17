@@ -35,6 +35,8 @@ export type PlistOptions = {
   logPath: string;
   home: string;
   path: string;
+  /** Bind address. Omitted or 127.0.0.1 keeps the service on loopback. */
+  host?: string;
 };
 
 function xml(value: string): string {
@@ -50,6 +52,7 @@ export function buildPlist(o: PlistOptions): string {
     HOME: o.home,
     PATH: o.path,
   };
+  if (o.host !== undefined && o.host !== "127.0.0.1") env["TRACEPAPER_HOST"] = o.host;
   const envXml = Object.entries(env)
     .map(([k, v]) => `      <key>${xml(k)}</key>\n      <string>${xml(v)}</string>`)
     .join("\n");
@@ -138,9 +141,10 @@ function launchctl(args: string[]): { ok: boolean; out: string } {
 
 type Health = { ok: boolean; mcp: boolean; version: string | null; frames: number };
 
-async function health(port: number): Promise<Health | null> {
+async function health(port: number, host = "127.0.0.1"): Promise<Health | null> {
+  const probe = host === "0.0.0.0" || host === "::" || host === "*" ? "127.0.0.1" : host;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`http://${probe}:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
     if (!res.ok) return null;
     const b = (await res.json()) as { ok?: unknown; mcp?: unknown; version?: unknown; frames?: unknown };
     return {
@@ -248,6 +252,7 @@ async function install(rest: string[]): Promise<number> {
       logPath: p.logPath,
       home: homedir(),
       path: process.env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+      host: config.host,
     }),
   );
 
@@ -268,7 +273,7 @@ async function install(rest: string[]): Promise<number> {
   const until = Date.now() + START_DEADLINE_MS;
   while (Date.now() < until) {
     const st = launchdState(p.label);
-    const h = await health(port);
+    const h = await health(port, config.host);
     if (st.pid !== null && portOwner(port) === st.pid && h !== null && h.ok && h.mcp) {
       say(`installed ${p.label} (pid ${st.pid}, tracepaper ${h.version ?? "?"})`);
       say(`  canvas: http://127.0.0.1:${port}`);
@@ -311,10 +316,11 @@ async function status(): Promise<number> {
   const installed = existsSync(p.plistPath);
   const plist = installed ? readFileSync(p.plistPath, "utf8") : "";
   const port = Number(/TRACEPAPER_PORT<\/key>\s*<string>(\d+)/.exec(plist)?.[1] ?? config.port);
+  const host = /TRACEPAPER_HOST<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1] ?? "127.0.0.1";
   const entry = /<string>run<\/string>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1] ?? "(no plist)";
   const st = launchdState(p.label);
   const owner = portOwner(port);
-  const h = await health(port);
+  const h = await health(port, host);
   const owns = st.pid !== null && owner === st.pid;
 
   say(`service:    ${p.label} — ${installed ? "installed" : "NOT installed"}, ${st.loaded ? "loaded" : "not loaded"}`);

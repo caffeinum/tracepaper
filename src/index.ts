@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, type Config } from "./config.ts";
+import { loadConfig, takeHostFlag, type Config } from "./config.ts";
 import type { HttpServer } from "./http.ts";
 import { CLI_VERBS } from "./verbs.ts";
 
@@ -113,6 +113,11 @@ async function runServer(mode: Mode, config: Config): Promise<void> {
     return own.status === "on" ? own.url : http.url;
   };
   console.error(`[tracepaper] canvas at ${http.url}  db=${config.dbPath}  mode=${mode}`);
+  if (config.host !== "127.0.0.1" && config.host !== "localhost") {
+    console.error(
+      `[tracepaper] bound ${config.host}. anyone who can reach this port can read frames and call /mcp. writes still need the x-tracepaper header.`,
+    );
+  }
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
@@ -173,8 +178,14 @@ async function main(): Promise<void> {
     process.exit(await runService(rest));
   }
 
-  const mode = parseMode(process.argv.slice(2));
-  const config = loadConfig();
+  const { argv: serveArgs, host: hostFlag } = takeHostFlag(process.argv.slice(2));
+  const mode = parseMode(serveArgs);
+  if (hostFlag !== undefined && mode !== "serve") {
+    throw new Error("--host is only for `tracepaper serve`");
+  }
+  const config = loadConfig(
+    hostFlag === undefined ? process.env : { ...process.env, TRACEPAPER_HOST: hostFlag },
+  );
 
   // The common case once `tracepaper up` is running: a shared server already speaks MCP over HTTP,
   // so bridge to it instead of loading our own ~56MB MCP server. The bridge imports no SDK.

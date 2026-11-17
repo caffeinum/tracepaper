@@ -33,6 +33,35 @@ export function expandHome(path: string): string {
   return path;
 }
 
+function parseHost(raw: string, name: string): string {
+  const host = raw.trim();
+  if (host === "") throw new Error(`${name} is set but empty`);
+  if (host.includes("://") || /[\s/]/.test(host)) {
+    throw new Error(`${name} must be an IP or hostname, not a URL, got: ${raw}`);
+  }
+  return host;
+}
+
+/** `--host <ip>` on `tracepaper serve`. The flag wins over TRACEPAPER_HOST. */
+export function takeHostFlag(argv: string[]): { argv: string[]; host: string | undefined } {
+  const out: string[] = [];
+  let host: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? "";
+    if (arg !== "--host" && !arg.startsWith("--host=")) {
+      out.push(arg);
+      continue;
+    }
+    const value = arg === "--host" ? argv[i + 1] : arg.slice("--host=".length);
+    if (arg === "--host") i++;
+    if (value === undefined || value === "" || value.startsWith("-")) {
+      throw new Error("--host needs an IP or hostname, for example 0.0.0.0");
+    }
+    host = parseHost(value, "--host");
+  }
+  return { argv: out, host };
+}
+
 function parsePort(raw: string, name: string): number {
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -106,7 +135,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   return {
     port: rawPort === undefined ? DEFAULT_PORT : parsePort(rawPort.value, rawPort.name),
-    host: rawHost === undefined ? DEFAULT_HOST : rawHost.value,
+    host: rawHost === undefined ? DEFAULT_HOST : parseHost(rawHost.value, rawHost.name),
     dbPath,
     stateDir,
     serverJsonPath: resolve(stateDir, "server.json"),
