@@ -256,6 +256,11 @@ const tabComments = el<HTMLButtonElement>("list-tab-comments");
 const tabFrames = el<HTMLButtonElement>("list-tab-frames");
 const sidebar = el<HTMLElement>("sidebar");
 const sidebarClose = el<HTMLButtonElement>("sidebar-close");
+const layers = el<HTMLElement>("layers");
+const layersList = el<HTMLDivElement>("layers-list");
+const layersCount = el<HTMLSpanElement>("layers-count");
+const layersClose = el<HTMLButtonElement>("layers-close");
+const toolLayers = el<HTMLButtonElement>("tool-layers");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
 const toolShare = el<HTMLButtonElement>("tool-share");
 const toolShareLabel = el<HTMLSpanElement>("tool-share-label");
@@ -1708,10 +1713,122 @@ function toggleCommentList(): void {
   setCommentList(!commentListOpen);
 }
 
+/** Frames on one horizontal band. A description sitting just above its mock is its own row. */
+const LAYER_ROW_GAP = 80;
+
+function layerRows(): CanvasFrame[][] {
+  const list = orderedFrames().filter((frame) => frame.kind !== "section");
+  list.sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows: CanvasFrame[][] = [];
+  for (const frame of list) {
+    const row = rows[rows.length - 1];
+    const head = row?.[0];
+    if (row && head && Math.abs(frame.y - head.y) <= LAYER_ROW_GAP) row.push(frame);
+    else rows.push([frame]);
+  }
+  for (const row of rows) row.sort((a, b) => a.x - b.x);
+  return rows;
+}
+
+/** A shared leading phrase, or null when the row's names don't agree. */
+function rowLabel(row: CanvasFrame[]): string | null {
+  if (row.length < 2) return null;
+  let prefix = row[0]!.name;
+  for (const frame of row.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < frame.name.length && prefix[i] === frame.name[i]) i += 1;
+    prefix = prefix.slice(0, i);
+  }
+  const cut = prefix.lastIndexOf(" ");
+  const word = (cut >= 3 ? prefix.slice(0, cut) : prefix).replace(/[\s·—\-–]+$/u, "").trim();
+  return word.length >= 3 ? word : null;
+}
+
+function renderLayers(): void {
+  const scroll = layersList.scrollTop;
+  layersList.replaceChildren();
+  const rows = layerRows();
+  const count = rows.reduce((sum, row) => sum + row.length, 0);
+  layersCount.textContent = count === 0 ? "" : String(count);
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "layers-empty";
+    empty.textContent = "No frames on this canvas.";
+    layersList.append(empty);
+    return;
+  }
+  for (const row of rows) {
+    const label = rowLabel(row);
+    if (label !== null) {
+      const head = document.createElement("div");
+      head.className = "group-head";
+      const name = document.createElement("b");
+      name.textContent = label;
+      head.append(name);
+      layersList.append(head);
+    } else if (layersList.childElementCount > 0) {
+      const gap = document.createElement("div");
+      gap.className = "layers-gap";
+      layersList.append(gap);
+    }
+    for (const frame of row) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "layer-item";
+      button.dataset["frameId"] = frame.id;
+      button.setAttribute("role", "listitem");
+      button.textContent = frame.name;
+      button.title = frame.name;
+      if (frame.id === selectedFrameId) {
+        button.classList.add("is-active");
+        button.setAttribute("aria-current", "true");
+      }
+      button.addEventListener("click", () => {
+        setInteractive(null);
+        setSelected(frame.id);
+        fitFrameLink(frame.id);
+      });
+      layersList.append(button);
+    }
+  }
+  layersList.scrollTop = scroll;
+}
+
+function markLayers(frameId: string | null): void {
+  let active: HTMLElement | null = null;
+  for (const button of layersList.querySelectorAll<HTMLButtonElement>(".layer-item")) {
+    const on = button.dataset["frameId"] === frameId;
+    button.classList.toggle("is-active", on);
+    if (on) {
+      button.setAttribute("aria-current", "true");
+      active = button;
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  }
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+const LAYERS_KEY = "tracepaper-layers";
+
+function setLayers(open: boolean): void {
+  layers.hidden = !open;
+  app.classList.toggle("layers-open", open);
+  toolLayers.setAttribute("aria-pressed", String(open));
+  localStorage.setItem(LAYERS_KEY, open ? "1" : "0");
+  if (open) renderLayers();
+  positionPanel();
+}
+
+function toggleLayers(): void {
+  setLayers(layers.hasAttribute("hidden"));
+}
+
 function renderAll(): void {
   renderFrames();
   renderPins();
   renderSidebar();
+  renderLayers();
   if (panel && panel.refresh) panel.refresh();
   positionPanel();
 }
@@ -1749,6 +1866,7 @@ function setSelected(frameId: string | null): void {
   if (changed) cmd0FitsAll = false;
   for (const [id, node] of frameNodes) node.root.classList.toggle("is-selected", id === frameId);
   writeFrameHash(frameId);
+  markLayers(frameId);
   syncShareButton();
 }
 
@@ -1758,19 +1876,32 @@ function setSelected(frameId: string | null): void {
  * back button with canvas states.
  */
 function writeFrameHash(frameId: string | null): void {
-  const next = frameId === null ? "" : `#frame=${frameId}`;
-  if (window.location.hash === next) return;
-  history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next}`);
+  const params = new URLSearchParams(window.location.search);
+  if (frameId === null) params.delete("frame");
+  else params.set("frame", frameId);
+  const search = params.toString();
+  const hash = frameId === null ? "" : `#frame=${frameId}`;
+  const next = `${window.location.pathname}${search === "" ? "" : `?${search}`}${hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (current === next) return;
+  history.replaceState(null, "", next);
 }
+
+const FRAME_ID_RE = /^frm_[0-9a-f]{12}$/;
 
 /**
  * `#frame=frm_…` is a VIEW HINT, not a permission boundary — it opens the canvas zoomed to one
  * frame, and everything else is still there to scroll to. Anyone with the link sees the whole
- * canvas either way.
+ * canvas either way. `?frame=frm_…` and a bare `#frm_…` are the same hint.
  */
 function frameFromHash(): string | null {
-  const match = /^#frame=(frm_[0-9a-f]{12})$/.exec(window.location.hash);
-  return match === null ? null : match[1] ?? null;
+  const tagged = /^#frame=(frm_[0-9a-f]{12})$/.exec(window.location.hash);
+  if (tagged?.[1]) return tagged[1];
+  const bare = /^#(frm_[0-9a-f]{12})$/.exec(window.location.hash);
+  if (bare?.[1]) return bare[1];
+  const query = new URLSearchParams(window.location.search).get("frame");
+  if (query !== null && FRAME_ID_RE.test(query)) return query;
+  return null;
 }
 
 /** Returns true when a hinted frame existed and was framed, so the caller can skip zoom-to-fit. */
@@ -1796,8 +1927,11 @@ function repoFromQuery(): string | null {
  * is the query, frame is the hash, and the two never clobber each other.
  */
 function writeRepoQuery(repo: string | null): void {
-  const search = repo === null ? "" : `?repo=${encodeURIComponent(repo)}`;
-  history.replaceState(null, "", `${window.location.pathname}${search}${window.location.hash}`);
+  const params = new URLSearchParams(window.location.search);
+  if (repo === null) params.delete("repo");
+  else params.set("repo", repo);
+  const search = params.toString();
+  history.replaceState(null, "", `${window.location.pathname}${search === "" ? "" : `?${search}`}${window.location.hash}`);
 }
 
 /** Rebuilds the switcher's options. There is no "all canvases" entry — the view is always one
@@ -2167,6 +2301,11 @@ window.addEventListener("keydown", (event) => {
     toggleCommentList();
     return;
   }
+  if (event.key === "l" || event.key === "L") {
+    event.preventDefault();
+    toggleLayers();
+    return;
+  }
   // Arrow keys pan the canvas for people without a trackpad/mouse. Shift pans a full "page" step.
   // Direction matches scrolling: ArrowDown reveals what's below, so the world slides up.
   if (
@@ -2234,6 +2373,8 @@ toolComment.addEventListener("click", () => {
   setTool(tool === "comment" ? "select" : "comment");
 });
 toolComments.addEventListener("click", () => toggleCommentList());
+toolLayers.addEventListener("click", () => toggleLayers());
+layersClose.addEventListener("click", () => setLayers(false));
 tabComments.addEventListener("click", () => setListMode("comments"));
 tabFrames.addEventListener("click", () => setListMode("frames"));
 sidebarClose.addEventListener("click", () => setCommentList(false));
@@ -2700,6 +2841,7 @@ window.addEventListener("error", (event) => {
 setTool("select");
 applyView();
 renderSidebar();
+setLayers(localStorage.getItem(LAYERS_KEY) === "1");
 // Reflect the canvas named in the URL before the first fetch, so a shared ?repo= link loads scoped.
 // With no ?repo=, loadAll picks the latest-written canvas — there is no "all canvases" view.
 currentRepo = repoFromQuery();

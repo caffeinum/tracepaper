@@ -25,6 +25,7 @@
   --accent-ink: #ffffff;
   --accent-soft: rgba(217, 79, 43, 0.12);
   --accent-line: rgba(217, 79, 43, 0.42);
+  --layers-w: 248px;
 
   /* Hand-drawn frame outline: paper fills the wobbly interior so no grid bleeds through the edge,
      ink strokes it. Selection recolors --sketch-ink to the accent (see .frame.is-selected). */
@@ -166,12 +167,107 @@ code {
 
 /* ---------- layout ---------- */
 
-/* The canvas is the product, so it gets the whole window. Every piece of chrome floats over
-   it and can be dismissed; nothing holds a permanent column of the viewport. */
+/* The canvas is the product. Chrome floats, except the layers list, which is a column you
+   open and close. Hidden, the canvas is the whole window. */
 #app {
   position: relative;
+  display: flex;
   height: 100%;
   overflow: hidden;
+}
+
+#app.layers-open .brand-chip {
+  left: calc(var(--layers-w) + 16px);
+}
+
+.layers {
+  flex: none;
+  width: var(--layers-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  z-index: 4;
+}
+
+.layers[hidden] {
+  display: none;
+}
+
+.layers-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px 8px 14px;
+}
+
+.layers-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.layers-count {
+  flex: 1;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.layers-note {
+  margin: 0;
+  padding: 0 14px 8px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.layers-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 16px;
+  scrollbar-width: thin;
+}
+
+.layers-gap {
+  height: 10px;
+}
+
+.layer-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-item:hover {
+  background: var(--surface-2);
+}
+
+.layer-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.layers-empty {
+  margin: 12px 8px;
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 .chip {
@@ -578,8 +674,10 @@ code {
 /* ---------- stage ---------- */
 
 .stage {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   overflow: hidden;
   background: var(--ground);
 }

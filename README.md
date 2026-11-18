@@ -287,9 +287,10 @@ and it reverts to localhost. Requires `cloudflared` on PATH (`brew install cloud
 panel says so if it is missing.
 
 **Linking to one frame.** Select a frame and the address bar becomes
-`…/#frame=frm_abc123`. Send that and it opens zoomed to that frame. It is a **view hint, not a
+`?repo=evals-ui&frame=frm_abc123#frame=frm_abc123`. Either form opens zoomed to that frame:
+`?frame=frm_…`, `#frame=frm_…`, or a bare `#frm_…`. It is a **view hint, not a
 permission boundary** — the whole canvas is still there to scroll to, and anyone with the link
-sees all of it either way.
+sees all of it either way. **Layers** (toolbar, or `L`) lists every frame; click a name to jump.
 
 Read the warnings in the panel — they are real:
 
@@ -360,7 +361,9 @@ update. Each comment records the `frameVersion` it was left on.
 - `c` (or the toolbar button) arms comment mode: the next click on a frame drops a pin
   at that frame-local coordinate and opens a composer. `esc` cancels.
 - Click a frame to select it (its label and outline pick up the accent). `f` or `⌘0` fits the
-  selection to the viewport; `⌘1` fits everything.
+  selection to the viewport; `⌘1` fits everything. **Layers** (`L`, or the toolbar button) opens a
+  left list of frame names, grouped by row. Click a name to jump to that frame. Closed, the canvas
+  is full width.
 - Drag a frame's **title** to move it. The title is the handle, so dragging never fights with
   clicking into the page itself. The move is written once on release.
 - Click a pin to open its thread — reply, resolve, or delete there. The copy icon on a note
