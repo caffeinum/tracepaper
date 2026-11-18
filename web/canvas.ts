@@ -1980,6 +1980,7 @@ window.addEventListener("pointerdown", (event) => {
 });
 
 function renderAll(): void {
+  document.title = currentRepo === null ? "tracepaper" : `${currentRepo} · tracepaper`;
   renderFrames();
   renderPins();
   renderSidebar();
