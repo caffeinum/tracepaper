@@ -948,21 +948,41 @@ code {
   box-shadow: var(--shadow-2);
 }
 
-/* Fit-zoom: 40 wobbly clips and shadows are what makes pan feel stuck. A plain edge is enough there. */
+/* Fit-zoom: 40 wobbly clips and shadows are what makes pan feel stuck. A plain edge is enough there.
+   A zoom gesture uses the same plain edge, and hides any live iframe, so the board is one scaled
+   layer until the gesture ends. Loading or unloading a document mid-zoom is the half-second stall. */
 .world.is-far .frame-sketch,
-.world.is-far .frame-sketch-fill {
+.world.is-far .frame-sketch-fill,
+.world.is-zooming .frame-sketch,
+.world.is-zooming .frame-sketch-fill {
   display: none;
 }
 
 .world.is-far .frame-thumb,
-.world.is-far .frame iframe {
+.world.is-far .frame iframe,
+.world.is-zooming .frame-thumb,
+.world.is-zooming .frame iframe {
   clip-path: none !important;
   border-radius: 2px;
 }
 
-.world.is-far .frame-body {
+.world.is-far .frame-body,
+.world.is-zooming .frame-body {
   box-shadow: none;
   background: var(--sketch-paper);
+}
+
+.world.is-zooming {
+  will-change: transform;
+}
+
+.world.is-zooming .frame iframe {
+  content-visibility: hidden;
+  visibility: hidden;
+}
+
+.world.is-zooming .frame-thumb[hidden] {
+  display: block !important;
 }
 
 /* Hand-drawn frame outline. The fill pass sits behind the iframe (paper backing, no stroke); the

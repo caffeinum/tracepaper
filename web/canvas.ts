@@ -401,6 +401,25 @@ function clamp(value: number, low: number, high: number): number {
 
 let viewPaint = 0;
 let lastDetailScale = -1;
+let zoomSettle = 0;
+
+/** A zoom gesture only moves the board. Iframe load and unload wait until it has been still. */
+const ZOOM_SETTLE_MS = 180;
+
+function armZoom(): void {
+  world.classList.add("is-zooming");
+  window.clearTimeout(zoomSettle);
+  zoomSettle = window.setTimeout(settleZoom, ZOOM_SETTLE_MS);
+}
+
+function settleZoom(): void {
+  zoomSettle = 0;
+  world.classList.remove("is-zooming");
+  world.classList.toggle("is-far", view.scale < 0.35);
+  lastDetailScale = view.scale;
+  updateFrameDetail();
+  if (panel) positionPanel();
+}
 
 function applyView(): void {
   if (viewPaint !== 0) return;
@@ -411,8 +430,9 @@ function paintView(): void {
   viewPaint = 0;
   world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   world.style.setProperty("--inv", String(1 / view.scale));
-  // The wobbly clip and drop shadow are invisible at fit-zoom and expensive across dozens of frames.
-  world.classList.toggle("is-far", view.scale < 0.35);
+  const zooming = world.classList.contains("is-zooming");
+  // Crossing the far threshold mid-gesture restyles every frame. Do it once, when the zoom stops.
+  if (!zooming) world.classList.toggle("is-far", view.scale < 0.35);
 
   let cell = GRID * view.scale;
   while (cell < 14) cell *= 4;
@@ -423,6 +443,7 @@ function paintView(): void {
   viewport.style.backgroundPosition = `${origin}, ${origin}`;
 
   toolZoomLevel.textContent = `${Math.round(view.scale * 100)}%`;
+  if (zooming) return;
   if (panel) positionPanel();
   if (lastDetailScale < 0 || Math.abs(view.scale - lastDetailScale) / Math.max(lastDetailScale, 0.01) > 0.08) {
     lastDetailScale = view.scale;
@@ -438,6 +459,7 @@ function zoomAt(anchor: Point, factor: number): void {
   view.scale = next;
   view.x = anchor.x - before.x * next;
   view.y = anchor.y - before.y * next;
+  armZoom();
   applyView();
 }
 
@@ -537,6 +559,8 @@ function panTo(worldX: number, worldY: number, scale: number): void {
   const start = performance.now();
   const duration = 320;
   cancelAnimationFrame(tween);
+  world.classList.add("is-zooming");
+  window.clearTimeout(zoomSettle);
   const step = (now: number): void => {
     const t = clamp((now - start) / duration, 0, 1);
     const eased = 1 - Math.pow(1 - t, 3);
@@ -545,6 +569,7 @@ function panTo(worldX: number, worldY: number, scale: number): void {
     view.y = from.y + (to.y - from.y) * eased;
     applyView();
     if (t < 1) tween = requestAnimationFrame(step);
+    else settleZoom();
   };
   tween = requestAnimationFrame(step);
 }
