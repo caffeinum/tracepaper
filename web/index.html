@@ -41,7 +41,6 @@
           <span id="layers-count" class="layers-count"></span>
           <button id="layers-close" class="ghost-btn" type="button" title="Close (L)">Close</button>
         </header>
-        <p class="layers-note">Click a name below to jump to it.</p>
         <div id="layers-list" class="layers-list" role="list"></div>
       </aside>
 
@@ -118,9 +117,8 @@
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14v2H3zm0 4.5h14v2H3zm0 4.5h14v2H3z" /></svg>
             <span>Layers</span>
           </button>
-          <button id="tool-comments" class="tool" type="button" title="List (t)" aria-pressed="false">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14v2H3zm0 4h14v2H3zm0 4h9v2H3z" /></svg>
-            <span>List</span>
+          <button id="tool-comments" class="tool icon" type="button" title="Comments (T)" aria-label="Comments" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v9H9l-4 3v-3H4z" /></svg>
             <span id="tool-comments-badge" class="badge" hidden>0</span>
           </button>
           <span class="tool-sep" aria-hidden="true"></span>
@@ -151,6 +149,15 @@
         <div id="layer" class="layer"></div>
         <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
       </main>
+
+      <div id="frame-menu" class="frame-menu" hidden role="menu">
+        <button type="button" data-action="share">Share</button>
+        <button type="button" data-action="png">Copy as PNG</button>
+        <button type="button" data-action="duplicate">Duplicate</button>
+        <button type="button" data-action="pause">Pause</button>
+        <div class="frame-menu-sep" aria-hidden="true"></div>
+        <button type="button" data-action="remove" class="is-danger">Remove</button>
+      </div>
     </div>
 
     <script type="module" src="/dist/canvas.js"></script>

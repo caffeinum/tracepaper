@@ -261,6 +261,7 @@ const layersList = el<HTMLDivElement>("layers-list");
 const layersCount = el<HTMLSpanElement>("layers-count");
 const layersClose = el<HTMLButtonElement>("layers-close");
 const toolLayers = el<HTMLButtonElement>("tool-layers");
+const frameMenu = el<HTMLDivElement>("frame-menu");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
 const toolShare = el<HTMLButtonElement>("tool-share");
 const toolShareLabel = el<HTMLSpanElement>("tool-share-label");
@@ -312,6 +313,19 @@ let hasFitted = false;
  * (?repo=…) so a canvas is linkable, and every data fetch and SSE update is scoped through it.
  */
 let currentRepo: string | null = null;
+// Frames whose live page is frozen on the snapshot. Right-click → Pause. Survives a refresh.
+const PAUSE_KEY = "tracepaper-paused";
+const pausedFrames = new Set<string>(readPaused());
+
+function readPaused(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PAUSE_KEY) ?? "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((id): id is string => typeof id === "string");
+  } catch {
+    return [];
+  }
+}
 // ⌘0 alternates between framing the selection and the whole canvas; this holds which comes next.
 let cmd0FitsAll = false;
 
@@ -968,6 +982,7 @@ function renderFrames(): void {
       node.drop.replaceChildren(link);
     }
     node.root.classList.toggle("is-interactive", interactiveFrameId === frame.id);
+    node.root.classList.toggle("is-paused", pausedFrames.has(frame.id));
     if (node.version !== frame.version) {
       node.version = frame.version;
       node.desiredSrc = `/f/${frame.id}?v=${frame.version}`;
@@ -1011,8 +1026,9 @@ function updateFrameDetail(): void {
     const ix = Math.max(0, Math.min(br.x, sw) - Math.max(tl.x, 0));
     const iy = Math.max(0, Math.min(br.y, sh) - Math.max(tl.y, 0));
     const coverage = (ix * iy) / stageArea;
-    const dominant = coverage > DOMINANT_COVERAGE || id === interactiveFrameId;
-    const interactive = id === interactiveFrameId;
+    const paused = pausedFrames.has(id);
+    const dominant = !paused && (coverage > DOMINANT_COVERAGE || id === interactiveFrameId);
+    const interactive = !paused && id === interactiveFrameId;
     if ((dominant || interactive) && node.kind === "html") {
       const src = node.desiredSrc !== "" ? node.desiredSrc : `/f/${frame.id}?v=${frame.version}`;
       node.desiredSrc = src;
@@ -1777,7 +1793,11 @@ function renderLayers(): void {
       button.className = "layer-item";
       button.dataset["frameId"] = frame.id;
       button.setAttribute("role", "listitem");
-      button.textContent = frame.name;
+      button.textContent = "";
+      const label = document.createElement("span");
+      label.className = "layer-name";
+      label.textContent = frame.name;
+      button.append(label);
       button.title = frame.name;
       if (frame.id === selectedFrameId) {
         button.classList.add("is-active");
@@ -1823,6 +1843,141 @@ function setLayers(open: boolean): void {
 function toggleLayers(): void {
   setLayers(layers.hasAttribute("hidden"));
 }
+
+let menuFrameId: string | null = null;
+
+function menuButton(action: string): HTMLButtonElement {
+  const button = frameMenu.querySelector(`button[data-action="${action}"]`);
+  if (!(button instanceof HTMLButtonElement)) throw new Error(`missing menu action: ${action}`);
+  return button;
+}
+
+function closeFrameMenu(): void {
+  frameMenu.hidden = true;
+  menuFrameId = null;
+}
+
+function openFrameMenu(frameId: string, x: number, y: number): void {
+  const frame = frames.get(frameId);
+  if (!frame) return;
+  menuFrameId = frameId;
+  setSelected(frameId);
+  const html = frame.kind === "html";
+  menuButton("share").hidden = !html;
+  menuButton("png").hidden = !html;
+  menuButton("pause").hidden = !html;
+  menuButton("pause").textContent = pausedFrames.has(frameId) ? "Resume" : "Pause";
+  frameMenu.hidden = false;
+  const rect = frameMenu.getBoundingClientRect();
+  frameMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+  frameMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+}
+
+function frameIdFromEvent(event: Event): string | null {
+  const target = event.target;
+  if (!(target instanceof Element)) return null;
+  const node = target.closest(".frame, .layer-item");
+  if (!(node instanceof HTMLElement)) return null;
+  const id = node.dataset["frameId"];
+  return id !== undefined && frames.has(id) ? id : null;
+}
+
+function setPaused(frameId: string, paused: boolean): void {
+  if (paused) pausedFrames.add(frameId);
+  else pausedFrames.delete(frameId);
+  localStorage.setItem(PAUSE_KEY, JSON.stringify([...pausedFrames]));
+  const node = frameNodes.get(frameId);
+  if (node) node.root.classList.toggle("is-paused", paused);
+  if (paused && interactiveFrameId === frameId) setInteractive(null);
+  updateFrameDetail();
+}
+
+async function shareFrame(frameId: string): Promise<void> {
+  const existing = shares.get(frameId);
+  const share = existing ?? toShare(await postJson(`/api/frames/${frameId}/share`, {}));
+  shares.set(share.frameId, share);
+  await navigator.clipboard.writeText(share.url);
+  renderFrames();
+  toast("Link copied", "info");
+}
+
+async function copyFramePng(frameId: string): Promise<void> {
+  const frame = frames.get(frameId);
+  if (!frame || frame.kind !== "html") throw new Error(`cannot copy a png of ${frameId}`);
+  try {
+    const item = new ClipboardItem({
+      "image/png": fetch(`/f/${frameId}.png`).then(async (response) => {
+        if (!response.ok) throw new Error(`png failed (${response.status})`);
+        const blob = await response.blob();
+        return blob.type === "image/png" ? blob : new Blob([await blob.arrayBuffer()], { type: "image/png" });
+      }),
+    });
+    await navigator.clipboard.write([item]);
+    toast("Copied PNG", "info");
+  } catch (error) {
+    const node = frameNodes.get(frameId);
+    if (node && node.kind === "html") {
+      node.save.click();
+      toast("Saved PNG", "info");
+      return;
+    }
+    throw error;
+  }
+}
+
+async function duplicateFrame(frameId: string): Promise<void> {
+  const raw = await api(`/api/frames/${frameId}`);
+  if (!isRecord(raw)) throw new Error(`frame ${frameId} is missing`);
+  const frame = toFrame(raw);
+  const html = typeof raw["html"] === "string" ? raw["html"] : "";
+  const created = toFrame(
+    await postJson("/api/frames", {
+      html,
+      name: `${frame.name} copy`,
+      width: frame.width,
+      height: frame.height,
+      x: frame.x + 48,
+      y: frame.y + 48,
+      repo: frame.repo,
+      kind: frame.kind,
+      ...(frame.fontSize === null ? {} : { fontSize: frame.fontSize }),
+    }),
+  );
+  putFrame(created);
+  renderAll();
+  setSelected(created.id);
+  fitFrameLink(created.id);
+}
+
+function onFrameMenu(event: MouseEvent): void {
+  const id = frameIdFromEvent(event);
+  if (id === null) return;
+  event.preventDefault();
+  openFrameMenu(id, event.clientX, event.clientY);
+}
+
+stage.addEventListener("contextmenu", onFrameMenu);
+layers.addEventListener("contextmenu", onFrameMenu);
+frameMenu.addEventListener("click", (event) => {
+  const target = event.target;
+  const button = target instanceof Element ? target.closest("button") : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  const id = menuFrameId;
+  const action = button.dataset["action"];
+  closeFrameMenu();
+  if (id === null || action === undefined) return;
+  if (action === "share") shareFrame(id).catch(fail);
+  else if (action === "png") copyFramePng(id).catch(fail);
+  else if (action === "duplicate") duplicateFrame(id).catch(fail);
+  else if (action === "pause") setPaused(id, !pausedFrames.has(id));
+  else if (action === "remove") requestDeleteFrame(id);
+});
+window.addEventListener("pointerdown", (event) => {
+  if (frameMenu.hidden) return;
+  const target = event.target;
+  if (target instanceof Element && frameMenu.contains(target)) return;
+  closeFrameMenu();
+});
 
 function renderAll(): void {
   renderFrames();
@@ -2230,7 +2385,8 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
-    if (panel) closePanel();
+    if (!frameMenu.hidden) closeFrameMenu();
+    else if (panel) closePanel();
     else if (commentListOpen) setCommentList(false);
     else if (interactiveFrameId !== null) setInteractive(null);
     else if (tool !== "select") setTool("select");

@@ -363,7 +363,8 @@ update. Each comment records the `frameVersion` it was left on.
 - Click a frame to select it (its label and outline pick up the accent). `f` or `⌘0` fits the
   selection to the viewport; `⌘1` fits everything. **Layers** (`L`, or the toolbar button) opens a
   left list of frame names, grouped by row. Click a name to jump to that frame. Closed, the canvas
-  is full width.
+  is full width. Right-click a frame for share, copy as PNG, duplicate, pause and remove. Pause
+  freezes that frame on its snapshot so the live page stops running.
 - Drag a frame's **title** to move it. The title is the handle, so dragging never fights with
   clicking into the page itself. The move is written once on release.
 - Click a pin to open its thread — reply, resolve, or delete there. The copy icon on a note
