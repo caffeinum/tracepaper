@@ -480,6 +480,20 @@ function zoomToFit(): void {
   fitBox(box);
 }
 
+/** A #frame= link shows the top of the frame at a readable width. Fitting the whole box
+ * shrinks a tall page to a sliver (a 7700px frame becomes 9%). */
+function fitFrameLink(frameId: string): void {
+  const frame = frames.get(frameId);
+  if (!frame) throw new Error(`cannot fit unknown frame: ${frameId}`);
+  const { width } = stageSize();
+  const pad = 48;
+  const scale = clamp((width - pad * 2) / frame.width, MIN_SCALE, 1);
+  view.scale = scale;
+  view.x = width / 2 - (frame.x + frame.width / 2) * scale;
+  view.y = pad - frame.y * scale;
+  applyView();
+}
+
 /** Fills the viewport with one frame — what you want when you step into it to actually use it. */
 function fitFrame(frameId: string, animate = true): void {
   const frame = frames.get(frameId);
@@ -1764,7 +1778,7 @@ function applyFrameHash(animate = false): boolean {
   const wanted = frameFromHash();
   if (wanted === null || !frames.has(wanted)) return false;
   setSelected(wanted);
-  fitFrame(wanted, animate);
+  fitFrameLink(wanted);
   return true;
 }
 
@@ -2677,6 +2691,9 @@ function subscribe(): void {
 }
 
 window.addEventListener("error", (event) => {
+  // A sandboxed frame is an opaque origin. Its script errors arrive here as "Script error."
+  // with a null error. Logging that makes the page look crashed. It is not this page.
+  if (event.error == null) return;
   console.error("[canvas] uncaught", event.error);
 });
 
