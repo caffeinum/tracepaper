@@ -258,9 +258,8 @@ const sidebar = el<HTMLElement>("sidebar");
 const sidebarClose = el<HTMLButtonElement>("sidebar-close");
 const layers = el<HTMLElement>("layers");
 const layersList = el<HTMLDivElement>("layers-list");
-const layersCount = el<HTMLSpanElement>("layers-count");
-const layersClose = el<HTMLButtonElement>("layers-close");
 const toolLayers = el<HTMLButtonElement>("tool-layers");
+const brandFrames = el<HTMLButtonElement>("brand-frames");
 const frameMenu = el<HTMLDivElement>("frame-menu");
 const toolZoomLevel = el<HTMLButtonElement>("tool-zoom-level");
 const toolShare = el<HTMLButtonElement>("tool-share");
@@ -1810,8 +1809,6 @@ function renderLayers(): void {
   const scroll = layersList.scrollTop;
   layersList.replaceChildren();
   const rows = layerRows();
-  const count = rows.reduce((sum, row) => sum + row.length, 0);
-  layersCount.textContent = count === 0 ? "" : String(count);
   if (rows.length === 0) {
     const empty = document.createElement("p");
     empty.className = "layers-empty";
@@ -1879,11 +1876,10 @@ const LAYERS_KEY = "tracepaper-layers";
 
 function setLayers(open: boolean): void {
   layers.hidden = !open;
-  app.classList.toggle("layers-open", open);
   toolLayers.setAttribute("aria-pressed", String(open));
+  brandFrames.setAttribute("aria-pressed", String(open));
   localStorage.setItem(LAYERS_KEY, open ? "1" : "0");
   if (open) renderLayers();
-  positionPanel();
 }
 
 function toggleLayers(): void {
@@ -2020,10 +2016,12 @@ frameMenu.addEventListener("click", (event) => {
   else if (action === "remove") requestDeleteFrame(id);
 });
 window.addEventListener("pointerdown", (event) => {
-  if (frameMenu.hidden) return;
   const target = event.target;
-  if (target instanceof Element && frameMenu.contains(target)) return;
-  closeFrameMenu();
+  if (!frameMenu.hidden && !(target instanceof Element && frameMenu.contains(target))) closeFrameMenu();
+  if (layers.hidden) return;
+  if (!(target instanceof Element)) return;
+  if (layers.contains(target) || brandFrames.contains(target) || toolLayers.contains(target)) return;
+  setLayers(false);
 });
 
 function renderAll(): void {
@@ -2441,6 +2439,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (!frameMenu.hidden) closeFrameMenu();
     else if (panel) closePanel();
+    else if (!layers.hidden) setLayers(false);
     else if (commentListOpen) setCommentList(false);
     else if (interactiveFrameId !== null) setInteractive(null);
     else if (tool !== "select") setTool("select");
@@ -2585,7 +2584,7 @@ toolComment.addEventListener("click", () => {
 });
 toolComments.addEventListener("click", () => toggleCommentList());
 toolLayers.addEventListener("click", () => toggleLayers());
-layersClose.addEventListener("click", () => setLayers(false));
+brandFrames.addEventListener("click", () => toggleLayers());
 tabComments.addEventListener("click", () => setListMode("comments"));
 tabFrames.addEventListener("click", () => setListMode("frames"));
 sidebarClose.addEventListener("click", () => setCommentList(false));
