@@ -313,6 +313,21 @@ let hasFitted = false;
  * (?repo=…) so a canvas is linkable, and every data fetch and SSE update is scoped through it.
  */
 let currentRepo: string | null = null;
+/** Set by the published page. Null on the local canvas. */
+const publicSlug = readPublicSlug();
+let publishedName: string | null = null;
+let publishedVersion = -1;
+
+function readPublicSlug(): string | null {
+  const value = (window as Window & { __TRACEPAPER_PUBLIC__?: { slug?: string } }).__TRACEPAPER_PUBLIC__;
+  if (value === undefined || typeof value.slug !== "string" || value.slug === "") return null;
+  return value.slug;
+}
+
+function frameDocUrl(id: string, version: number): string {
+  if (publicSlug !== null) return `/c/${publicSlug}/f/${id}?v=${version}`;
+  return `/f/${id}?v=${version}`;
+}
 // Frames whose live page is frozen on the snapshot. Right-click → Pause. Survives a refresh.
 const PAUSE_KEY = "tracepaper-paused";
 const pausedFrames = new Set<string>(readPaused());
@@ -1010,14 +1025,17 @@ function renderFrames(): void {
     node.root.classList.toggle("is-paused", pausedFrames.has(frame.id));
     if (node.version !== frame.version) {
       node.version = frame.version;
-      node.desiredSrc = `/f/${frame.id}?v=${frame.version}`;
-      // The thumbnail is content-addressed by version, so a new version fetches a fresh PNG (and the
-      // browser caches each version immutably). loading="lazy" defers off-screen fetches.
-      // shot=2 busts the immutable cache of thumbs rendered under the 4000px height clamp.
-      node.thumb.src = `/f/${frame.id}.png?v=${frame.version}&shot=2`;
-      // Refresh the live iframe only if it's currently the dominant frame; otherwise it stays on the
-      // thumbnail and goes live (at the new version) when zoomed into.
-      if (node.loaded) node.iframe.src = node.desiredSrc;
+      node.desiredSrc = frameDocUrl(frame.id, frame.version);
+      if (publicSlug !== null) {
+        // No baked snapshot yet, so the page itself is the picture. Same chrome as local.
+        node.thumb.hidden = true;
+        node.iframe.hidden = false;
+        node.iframe.src = node.desiredSrc;
+        node.loaded = true;
+      } else {
+        node.thumb.src = `/f/${frame.id}.png?v=${frame.version}&shot=2`;
+        if (node.loaded) node.iframe.src = node.desiredSrc;
+      }
     }
   }
   for (const [id, node] of [...frameNodes]) {
@@ -1038,6 +1056,8 @@ function renderFrames(): void {
 const DOMINANT_COVERAGE = 0.5;
 
 function updateFrameDetail(): void {
+  // A published board has no snapshots, so every frame stays a live page. Unloading here would blank it.
+  if (publicSlug !== null) return;
   const { width: sw, height: sh } = stageSize();
   const stageArea = sw * sh;
   if (stageArea <= 0) return;
@@ -1091,6 +1111,7 @@ function updateFrameDetail(): void {
  * A stationary press stays a click, so double-click-to-interact still works.
  */
 function beginFrameDrag(frameId: string, event: PointerEvent): void {
+  if (publicSlug !== null) return;
   const frame = frames.get(frameId);
   if (!frame) throw new Error(`drag started on an unknown frame: ${frameId}`);
   const node = frameNodes.get(frameId);
@@ -1991,6 +2012,7 @@ frameMenu.addEventListener("click", (event) => {
   const action = button.dataset["action"];
   closeFrameMenu();
   if (id === null || action === undefined) return;
+  if (publicSlug !== null && action !== "pause") return;
   if (action === "share") shareFrame(id).catch(fail);
   else if (action === "png") copyFramePng(id).catch(fail);
   else if (action === "duplicate") duplicateFrame(id).catch(fail);
@@ -2005,7 +2027,12 @@ window.addEventListener("pointerdown", (event) => {
 });
 
 function renderAll(): void {
-  document.title = currentRepo === null ? "tracepaper" : `${currentRepo} · tracepaper`;
+  document.title =
+    publishedName !== null
+      ? `${publishedName} · tracepaper`
+      : currentRepo === null
+        ? "tracepaper"
+        : `${currentRepo} · tracepaper`;
   renderFrames();
   renderPins();
   renderSidebar();
@@ -2364,6 +2391,7 @@ function typingInField(): boolean {
 
 /** Delete a frame and its comments, after a confirm. Shared by the ✕ button and the delete keys. */
 function requestDeleteFrame(frameId: string): void {
+  if (publicSlug !== null) return;
   const frame = frames.get(frameId);
   if (!frame) return;
   if (!window.confirm(`Delete "${frame.name}" and its comments?`)) return;
@@ -2451,6 +2479,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "c" || event.key === "C") {
+    if (publicSlug !== null) return;
     event.preventDefault();
     setInteractive(null);
     setTool(tool === "comment" ? "select" : "comment");
@@ -2637,7 +2666,55 @@ el<HTMLButtonElement>("copy-config").addEventListener("click", (event) => {
 
 // ---------------------------------------------------------------- data + sse
 
+async function loadPublished(slug: string): Promise<void> {
+  const payload = await api(`/api/canvases/${slug}`);
+  if (!isRecord(payload)) throw new Error(`published canvas ${slug} was not an object`);
+  const version = num(payload, "version", "canvas");
+  if (version === publishedVersion && frames.size > 0) return;
+  publishedVersion = version;
+  publishedName = str(payload, "name", "canvas");
+  currentRepo = slug;
+  frames.clear();
+  frameOrder.length = 0;
+  comments.clear();
+  shares.clear();
+  for (const raw of toList(payload, "frames")) {
+    if (!isRecord(raw)) throw new Error(`published frame must be an object, got ${preview(raw)}`);
+    putFrame(toFrame({ ...raw, repo: slug, createdBy: null }));
+  }
+  renderRepoSwitcher([{ repo: slug, frameCount: frames.size }]);
+  const option = repoSwitcher.options[0];
+  if (option !== undefined) option.textContent = `${publishedName} · ${frames.size}`;
+  repoSwitcher.disabled = true;
+  renderAll();
+  if (!hasFitted && frames.size > 0) {
+    hasFitted = true;
+    if (!applyFrameHash()) zoomToFit();
+  }
+}
+
+function watchPublished(slug: string): void {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${proto}//${location.host}/c/${slug}/live`);
+  socket.onmessage = (event) => {
+    let data: unknown;
+    try {
+      data = JSON.parse(String(event.data));
+    } catch {
+      return;
+    }
+    if (!isRecord(data) || data["type"] !== "updated") return;
+    if (data["version"] === publishedVersion) return;
+    loadPublished(slug).catch(fail);
+  };
+  socket.onclose = () => setTimeout(() => watchPublished(slug), 2000);
+}
+
 async function loadAll(): Promise<void> {
+  if (publicSlug !== null) {
+    await loadPublished(publicSlug);
+    return;
+  }
   // The view is always exactly one canvas — never "all canvases" (that fetched every repo's frames
   // and was slow). With no canvas selected yet (fresh load, no ?repo=, or an empty db), resolve the
   // latest-written one from the repo list first, then fall through to its scoped fetch.
@@ -3034,7 +3111,11 @@ window.addEventListener("hashchange", () => {
   applyFrameHash(true);
 });
 
-subscribe();
-reconcile();
-void setShare("read");
+if (publicSlug === null) {
+  subscribe();
+  reconcile();
+  void setShare("read");
+} else {
+  watchPublished(publicSlug);
+}
 listenForFrameEscape();

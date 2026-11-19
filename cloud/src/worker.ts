@@ -1,10 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import { handleMcp } from "./mcp.ts";
+import { publishedCanvasHtml } from "./page.ts";
 import { bearerMatches, parsePublish, parseSlug, PublishError, type PublishBody, type PublishFrame } from "./validate.ts";
 
 interface Env {
   CANVAS: DurableObjectNamespace<Canvas>;
   REGISTRY: DurableObjectNamespace<Registry>;
+  /** The local canvas files (web/). The published page is that UI, not a second viewer. */
+  ASSETS: Fetcher;
   /** Set with `wrangler secret put PUBLISH_TOKEN`. Writes refuse when it is missing. */
   PUBLISH_TOKEN?: string;
 }
@@ -444,185 +447,20 @@ function publicUrls(request: Request, id: string, editKey: string): { url: strin
   };
 }
 
-function viewerHtml(slug: string): string {
-  return `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${slug}</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f1ea; color: #1c1915; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
-  #stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; background-color: #f4f1ea; background-image: linear-gradient(90deg, #e4ddd2 1px, transparent 1px), linear-gradient(#e4ddd2 1px, transparent 1px); }
-  #stage.is-panning { cursor: grabbing; }
-  #bar { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; background: #f4f1eacc; border-radius: 8px; pointer-events: none; }
-  #world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
-  .frame { position: absolute; background: white; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
-  iframe { border: 0; width: 100%; height: 100%; background: white; pointer-events: none; }
-  .text { display: flex; align-items: center; padding: 0 8px; background: transparent; }
-  .section { border: 1px dashed #8a8175; background: transparent; }
-  .section span { position: absolute; top: -18px; left: 0; font-size: 12px; color: #6d645b; }
-</style>
-<div id="stage">
-  <div id="bar"><strong id="title"></strong><span id="meta"></span></div>
-  <div id="world"></div>
-</div>
-<script>
-const slug = ${JSON.stringify(slug)};
-const stage = document.getElementById("stage");
-const world = document.getElementById("world");
-const title = document.getElementById("title");
-const meta = document.getElementById("meta");
-const view = { x: 40, y: 48, scale: 1 };
-let version = 0;
-let frames = [];
+const STATIC_PATHS = new Set(["/style.css", "/dist/canvas.js", "/icon.svg"]);
 
-function paint() {
-  world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
-  let cell = 48 * view.scale;
-  while (cell < 16) cell *= 4;
-  while (cell > 160) cell /= 4;
-  const origin = Math.round(view.x) + "px " + Math.round(view.y) + "px";
-  stage.style.backgroundSize = cell + "px " + cell + "px, " + cell + "px " + cell + "px";
-  stage.style.backgroundPosition = origin + ", " + origin;
-  meta.textContent = frames.length + " frames · v" + version + " · " + Math.round(view.scale * 100) + "%";
+async function staticAsset(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== "GET" || !STATIC_PATHS.has(url.pathname)) return null;
+  return env.ASSETS.fetch(request);
 }
 
-function fit() {
-  if (frames.length === 0) return;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const frame of frames) {
-    minX = Math.min(minX, frame.x);
-    minY = Math.min(minY, frame.y);
-    maxX = Math.max(maxX, frame.x + frame.width);
-    maxY = Math.max(maxY, frame.y + frame.height);
-  }
-  const pad = 48;
-  const bar = 56;
-  const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, maxY - minY);
-  const scale = Math.min(
-    (stage.clientWidth - pad * 2) / spanX,
-    (stage.clientHeight - pad * 2 - bar) / spanY,
-  );
-  view.scale = scale;
-  view.x = pad + ((stage.clientWidth - pad * 2) - spanX * scale) / 2 - minX * scale;
-  view.y = bar + pad + ((stage.clientHeight - bar - pad * 2) - spanY * scale) / 2 - minY * scale;
-  paint();
+async function canvasPage(request: Request, env: Env, slug: string): Promise<Response> {
+  const file = await env.ASSETS.fetch(new Request(new URL("/index.html", request.url)));
+  if (!file.ok) return textError(500, "canvas ui is missing from the worker assets. run bun run build:web before deploy.");
+  const html = publishedCanvasHtml(await file.text(), slug);
+  return new Response(html, { headers: CANVAS_HEADERS });
 }
-
-function place(canvas) {
-  title.textContent = canvas.name;
-  version = canvas.version;
-  frames = canvas.frames;
-  world.replaceChildren();
-  for (const frame of frames) {
-    const box = document.createElement("div");
-    box.className = "frame " + frame.kind;
-    box.style.left = frame.x + "px";
-    box.style.top = frame.y + "px";
-    box.style.width = frame.width + "px";
-    box.style.height = frame.height + "px";
-    if (frame.kind === "html") {
-      const iframe = document.createElement("iframe");
-      iframe.setAttribute("sandbox", "allow-scripts allow-forms");
-      iframe.referrerPolicy = "no-referrer";
-      iframe.src = "/c/" + slug + "/f/" + frame.id + "?v=" + frame.version;
-      box.append(iframe);
-    } else if (frame.kind === "text") {
-      box.classList.add("text");
-      box.style.fontSize = (frame.fontSize || 32) + "px";
-      box.textContent = frame.name;
-    } else {
-      const label = document.createElement("span");
-      label.textContent = frame.name;
-      box.append(label);
-    }
-    world.append(box);
-  }
-  fit();
-  const match = /^#frame=(frm_[0-9a-f]{12})$/.exec(location.hash);
-  if (match) focus(frames.find((frame) => frame.id === match[1]));
-}
-
-function focus(frame) {
-  if (!frame) return;
-  const pad = 48;
-  const bar = 56;
-  const scale = Math.min(
-    (stage.clientWidth - pad * 2) / frame.width,
-    (stage.clientHeight - pad * 2 - bar) / frame.height,
-    1,
-  );
-  view.scale = scale;
-  view.x = stage.clientWidth / 2 - (frame.x + frame.width / 2) * scale;
-  view.y = (bar + stage.clientHeight) / 2 - (frame.y + frame.height / 2) * scale;
-  paint();
-}
-
-stage.addEventListener("wheel", (event) => {
-  event.preventDefault();
-  if (event.ctrlKey || event.metaKey) {
-    const next = Math.min(2.5, Math.max(0.02, view.scale * Math.exp(-event.deltaY * 0.002)));
-    const rect = stage.getBoundingClientRect();
-    const ax = event.clientX - rect.left;
-    const ay = event.clientY - rect.top;
-    const wx = (ax - view.x) / view.scale;
-    const wy = (ay - view.y) / view.scale;
-    view.scale = next;
-    view.x = ax - wx * next;
-    view.y = ay - wy * next;
-  } else {
-    view.x -= event.deltaX;
-    view.y -= event.deltaY;
-  }
-  paint();
-}, { passive: false });
-
-let drag = null;
-stage.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0) return;
-  drag = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
-  stage.classList.add("is-panning");
-  stage.setPointerCapture(event.pointerId);
-});
-stage.addEventListener("pointermove", (event) => {
-  if (drag === null) return;
-  view.x = drag.vx + event.clientX - drag.x;
-  view.y = drag.vy + event.clientY - drag.y;
-  paint();
-});
-stage.addEventListener("pointerup", () => {
-  drag = null;
-  stage.classList.remove("is-panning");
-});
-window.addEventListener("keydown", (event) => {
-  if (event.key === "0") fit();
-});
-
-async function load() {
-  const res = await fetch("/api/canvases/" + slug);
-  if (!res.ok) {
-    title.textContent = slug;
-    meta.textContent = res.status + " " + (await res.text());
-    return;
-  }
-  place(await res.json());
-}
-
-function live() {
-  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/c/" + slug + "/live");
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.version !== version) load();
-  };
-  ws.onclose = () => setTimeout(live, 2000);
-}
-load();
-live();
-</script>
-`;
-}
-
 function listHtml(canvases: Array<{ id: string; name: string; frameCount: number }>): string {
   const items = canvases
     .map(
@@ -645,6 +483,15 @@ ${items.length > 0 ? `<ul>${items}</ul>` : "<p>nothing published.</p>"}
 `;
 }
 
+const CANVAS_HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "content-security-policy":
+    "frame-ancestors 'none'; default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; img-src 'self' data:; font-src 'self' data:",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+  "cache-control": "no-store",
+};
+
 const APP_HEADERS = {
   "content-type": "text/html; charset=utf-8",
   "content-security-policy":
@@ -664,6 +511,9 @@ const FRAME_HEADERS = {
 };
 
 async function route(request: Request, env: Env): Promise<Response> {
+  const asset = await staticAsset(request, env);
+  if (asset !== null) return asset;
+
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter((part) => part.length > 0);
 
@@ -753,7 +603,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (parts.length === 2 && request.method === "GET") {
       const canvas = await canvasStub(env, slug).read();
       if (canvas === null) return textError(404, `unknown canvas: ${slug}`);
-      return new Response(viewerHtml(slug), { headers: APP_HEADERS });
+      return canvasPage(request, env, slug);
     }
     if (parts[2] === "f" && parts.length === 4 && request.method === "GET") {
       const frameId = parts[3] ?? "";

@@ -169,6 +169,19 @@ code {
 
 /* The canvas is the product. Chrome floats, except the layers list, which is a column you
    open and close. Hidden, the canvas is the whole window. */
+html[data-public] #tool-comment,
+html[data-public] #tool-comments,
+html[data-public] #tool-share,
+html[data-public] .frame-kill,
+html[data-public] .frame-publish,
+html[data-public] .frame-save,
+html[data-public] #frame-menu [data-action="share"],
+html[data-public] #frame-menu [data-action="png"],
+html[data-public] #frame-menu [data-action="duplicate"],
+html[data-public] #frame-menu [data-action="remove"] {
+  display: none;
+}
+
 #app {
   position: relative;
   display: flex;

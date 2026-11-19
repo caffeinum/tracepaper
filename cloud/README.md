@@ -1,6 +1,6 @@
 # tracepaper cloud
 
-a published canvas. not the local bun server.
+a published canvas. the page at `/c/<slug>` is the local canvas (`web/index.html`, `web/style.css`, `web/dist/canvas.js`), told which slug to read. comments and writes are off. a ui change ships here on the next `bun run build:web` and `npx wrangler deploy`.
 
 ## resources
 
