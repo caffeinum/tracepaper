@@ -212,7 +212,7 @@ html[data-public] #frame-menu [data-action="remove"] {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px 0 8px;
+  padding: 8px;
   scrollbar-width: thin;
 }
 
@@ -223,7 +223,7 @@ html[data-public] #frame-menu [data-action="remove"] {
 .layer-item {
   display: block;
   width: 100%;
-  height: 28px;
+  height: 32px;
   margin: 0;
   padding: 0 12px;
   border: 0;
@@ -252,6 +252,10 @@ html[data-public] #frame-menu [data-action="remove"] {
 .layer-item.is-active {
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+.layers .group-head {
+  padding: 12px 12px 6px;
 }
 
 .layers-empty {
